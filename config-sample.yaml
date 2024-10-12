@@ -1,0 +1,27 @@
+# config.yaml
+
+# Paths to the Lich and Profanity binaries
+paths:
+  lich_bin: '/your/path/to/Lich5/lich5/lich.rbw'
+  profanity_bin: '/your/path/to/ProfanityFE/profanity.rb'
+
+# Character accounts and their characters
+accounts:
+  account1:
+    - char1
+    - char2
+    - char3
+    - char4
+    - char5
+  account2:
+    - char1
+    - char2
+    - char3
+    - char4
+    - char5
+  account3:
+    - char1
+    - char2
+    - char3
+    - char4
+    - char5
