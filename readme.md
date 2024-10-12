@@ -1,7 +1,3 @@
-Certainly! Here is the README file formatted in Markdown:
-
----
-
 # Gemstone Launcher Script
 
 This script provides a terminal-based interface for launching characters in GemstonIV using Lich and the Profanity Front End. It allows you to select characters from your accounts and handles the login process then launches Profanity. It also displays the online status of characters currently logged in on the same computer.
