@@ -25,3 +25,8 @@ accounts:
     - char3
     - char4
     - char5
+
+# Optional: bundled ProfanityFE template used for characters that have no
+# ~/.profanity/<char>.xml (per-char files always win). default.xml is a
+# DragonRealms layout; GemStone options: original.xml, tysong.xml, eleazzar.xml
+# profanity_template: original.xml

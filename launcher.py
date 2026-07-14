@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 # Constants for Lich and Profanity binaries will be set from the config file
 LICH_BIN = ""
 PROFANITY_BIN = ""
+PROFANITY_TEMPLATE = ""  # optional bundled template (used when no ~/.profanity/<char>.xml exists)
 DEBUG = True  # Set to False to disable debug output
 
 # Configuration file path
@@ -40,11 +41,12 @@ def load_config():
 
 
 def init_paths(config):
-    global LICH_BIN, PROFANITY_BIN
+    global LICH_BIN, PROFANITY_BIN, PROFANITY_TEMPLATE
 
     paths = config.get('paths', {})
     LICH_BIN = paths.get('lich_bin', '')
     PROFANITY_BIN = paths.get('profanity_bin', '')
+    PROFANITY_TEMPLATE = config.get('profanity_template', '')
 
     if not LICH_BIN or not PROFANITY_BIN:
         logger.error("LICH_BIN and PROFANITY_BIN paths must be specified in the configuration file.")
@@ -313,6 +315,11 @@ def start_lich_backend(char: str, port: int):
 
 def connect_to_lich(char: str, port: int):
     profanity_path = os.path.abspath(PROFANITY_BIN)
+    # A per-character layout in ~/.profanity/ always wins; the configured
+    # template is only the fallback for characters without one (profanity's
+    # --template flag would otherwise override per-char files).
+    user_layout = os.path.expanduser(f'~/.profanity/{char.lower()}.xml')
+    use_template = PROFANITY_TEMPLATE and not os.path.exists(user_layout)
     for attempt in range(10):
         logger.info(f"Attempting to connect to lich process... (Attempt {attempt + 1}/10)")
         cmd = [
@@ -321,6 +328,8 @@ def connect_to_lich(char: str, port: int):
             f'--port={port}',
             f'--char={char}'
         ]
+        if use_template:
+            cmd.append(f'--template={PROFANITY_TEMPLATE}')
         try:
             subprocess.run(cmd, check=True)
             logger.info("Connection established. Exiting.")
