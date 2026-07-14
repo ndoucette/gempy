@@ -250,9 +250,33 @@ def launch_gemstone(char: str):
             port = max_port + 1
         logger.info(f"Detecting existing clients but no connection for this character. Using Port[{port}]")
         start_lich_backend(char, port)
-        time.sleep(4)  # Wait for the backend to initialize
+        # Wait for Lich's FE listener PASSIVELY (/proc/net/tcp) — never by
+        # connecting: Lich's detachable listener is single-client, and a
+        # connect probe landing mid-login wedges its accept loop.
+        if not wait_for_port_listen(port):
+            logger.error(f"Lich never opened port {port} — check login/flags (is the character name in Lich's saved entries?)")
+            return
+        time.sleep(2)  # let login settle before the FE attaches
 
     connect_to_lich(char, port)
+
+
+def wait_for_port_listen(port: int, timeout: float = 120.0) -> bool:
+    """True once 127.0.0.1:<port> is in LISTEN state, checked passively
+    via /proc/net/tcp{,6} (state 0A), polling until timeout."""
+    hex_port = format(port, '04X')
+    pattern = re.compile(rf':{hex_port} [0-9A-F]+:0+ 0A ', re.IGNORECASE)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for path in ('/proc/net/tcp', '/proc/net/tcp6'):
+            try:
+                with open(path, 'r') as f:
+                    if pattern.search(f.read()):
+                        return True
+            except OSError:
+                pass
+        time.sleep(0.5)
+    return False
 
 
 def is_character_running(char: str, process_output: str) -> bool:
