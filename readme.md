@@ -176,9 +176,9 @@ Once the script is running, you'll see a terminal-based interface displaying you
 
 ### Prime vs. test server
 
-A banner across the top of the screen always shows which server you're about to
-log into — green for prime, magenta for test. Press `t` to toggle; the `[Online]`
-markers refresh to show who is logged in *on that server*, since a character can
+The right-hand side of the bottom status bar always shows which server you're
+about to log into — green for prime, magenta for test. Press `t` to toggle; the
+`[Online]` markers refresh to show who is logged in *on that server*, since a character can
 be on prime and test at the same time and each gets its own Profanity port.
 
 Test logins pass `--gemstone --test` to Lich, which resolves to game code `GST`.

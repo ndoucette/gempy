@@ -160,13 +160,14 @@ def main(stdscr, config):
             launch_gemstone(selected_char, realm)
             return
         elif key in (ord('t'), ord('T')):
+            # The status-bar tag already reports the realm, so leave the
+            # message as the key hint rather than echoing it twice.
             realm = REALM_ORDER[(REALM_ORDER.index(realm) + 1) % len(REALM_ORDER)]
             character_statuses = get_character_statuses(columns, realm)
-            message = f"Server: {realm.upper()}"
         elif key in (ord('r'), ord('R')):
             # Refresh character statuses
             character_statuses = get_character_statuses(columns, realm)
-            message = f"Refreshed character statuses ({realm.upper()})"
+            message = "Refreshed character statuses"
         elif key == curses.KEY_RESIZE:
             stdscr.clear()
             stdscr.refresh()
@@ -185,21 +186,10 @@ def draw_screen(stdscr, columns, current_column, current_item, message, characte
 
     # Check if the terminal is tall enough
     max_items = max(len(col['items']) for col in columns)
-    if height < max_items + 4:  # Additional space for realm banner, header and message
+    if height < max_items + 3:  # Additional space for header and message
         stdscr.addstr(0, 0, "Terminal window is too small. Please resize.", curses.A_BOLD)
         stdscr.refresh()
         return
-
-    # Realm banner — test is coloured so an accidental test login is obvious
-    banner_style = curses.A_BOLD | (curses.color_pair(4) if realm == TEST else curses.color_pair(2))
-    banner = f" SERVER: {realm.upper()} "
-    if realm != PRIME:
-        banner += f"({' '.join(REALM_FLAGS.get(realm, [])) or 'no flags'}) "
-    banner += " — press 't' to toggle"
-    try:
-        stdscr.addstr(0, 0, banner.ljust(width - 1)[:width - 1], banner_style)
-    except curses.error:
-        pass
 
     for col_index, column in enumerate(columns):
         x = col_index * column_width
@@ -207,13 +197,13 @@ def draw_screen(stdscr, columns, current_column, current_item, message, characte
         # Draw header
         header = column['header']
         try:
-            stdscr.addstr(1, x, header.center(column_width - 1), curses.A_REVERSE)
+            stdscr.addstr(0, x, header.center(column_width - 1), curses.A_REVERSE)
         except curses.error:
             pass  # Ignore errors caused by writing outside the screen
 
         # Draw items
         for item_index, item in enumerate(column['items']):
-            y = item_index + 2
+            y = item_index + 1
             if y >= height - 1:
                 continue  # Skip if beyond screen height
 
@@ -239,11 +229,22 @@ def draw_screen(stdscr, columns, current_column, current_item, message, characte
             except curses.error:
                 pass  # Ignore errors caused by writing outside the screen
 
-    # Draw message at the bottom
+    # Status bar: message on the left, target server pinned to the right.
+    # Test is coloured so an accidental test login is obvious before Enter.
     try:
-        stdscr.addstr(height - 1, 0, message.ljust(width - 1), curses.A_REVERSE)
+        stdscr.addstr(height - 1, 0, message.ljust(width - 1)[:width - 1], curses.A_REVERSE)
     except curses.error:
         pass  # Ignore errors caused by writing outside the screen
+
+    tag = f" SERVER: {realm.upper()} "
+    tag_style = curses.A_REVERSE | curses.A_BOLD | (curses.color_pair(4) if realm == TEST else curses.color_pair(2))
+    tag_x = width - 1 - len(tag)
+    # Drop the tag rather than overwrite the message on a narrow terminal.
+    if tag_x > len(message):
+        try:
+            stdscr.addstr(height - 1, tag_x, tag, tag_style)
+        except curses.error:
+            pass  # Ignore errors caused by writing outside the screen
 
     stdscr.refresh()
 
