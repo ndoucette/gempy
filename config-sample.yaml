@@ -26,6 +26,18 @@ accounts:
     - char4
     - char5
 
+# Optional: which server the launcher starts on — 'prime' (default) or 'test'.
+# Press 't' in the launcher to toggle between them at any time.
+# default_realm: prime
+
+# Optional: Lich flags used to select each server. The defaults are shown; you
+# only need this if Lich's game-selection flags change. Note that '--test' must
+# be paired with '--gemstone': on its own, Lich fails instance resolution and
+# refuses the login.
+# realms:
+#   prime: []                        # uses the saved entry's own instance (GS3)
+#   test: ["--gemstone", "--test"]   # GST
+
 # Optional: bundled ProfanityFE template used for characters that have no
 # ~/.profanity/<char>.xml (per-char files always win). default.xml is a
 # DragonRealms layout; GemStone options: original.xml, tysong.xml, eleazzar.xml

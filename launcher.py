@@ -25,6 +25,20 @@ DEBUG = True  # Set to False to disable debug output
 # Configuration file path
 CONFIG_FILE = 'config.yaml'
 
+# Realms we can log into. The Lich flags are what select the game instance:
+# `--gemstone --test` resolves to game code GST, which Lich falls back to the
+# saved GS3 (prime) entry for — so no separate saved login is needed for test.
+# `--test` on its own is NOT enough: without --gemstone Lich fails instance
+# resolution and refuses the login.
+PRIME = 'prime'
+TEST = 'test'
+REALM_ORDER = [PRIME, TEST]
+DEFAULT_REALM_FLAGS = {
+    PRIME: [],                        # saved entry's own instance (GS3)
+    TEST: ['--gemstone', '--test'],   # GST
+}
+REALM_FLAGS = dict(DEFAULT_REALM_FLAGS)
+
 
 def load_config():
     if not os.path.exists(CONFIG_FILE):
@@ -38,6 +52,27 @@ def load_config():
         except yaml.YAMLError as e:
             logger.error(f"Error parsing configuration file: {e}")
             sys.exit(1)
+
+
+def init_realms(config):
+    """Realm flags are overridable in config.yaml, e.g.
+
+    realms:
+      test: ["--gemstone", "--test"]
+    """
+    global REALM_FLAGS
+
+    REALM_FLAGS = dict(DEFAULT_REALM_FLAGS)
+    for realm, flags in (config.get('realms') or {}).items():
+        if realm not in REALM_FLAGS:
+            logger.warning(f"Ignoring unknown realm in config: {realm}")
+            continue
+        if isinstance(flags, str):
+            flags = flags.split()
+        REALM_FLAGS[realm] = list(flags or [])
+
+    if DEBUG:
+        logger.debug(f"Realm flags: {REALM_FLAGS}")
 
 
 def init_paths(config):
@@ -82,6 +117,7 @@ def main(stdscr, config):
     curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_BLACK)   # Default
     curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)   # Online
     curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)  # Selected
+    curses.init_pair(4, curses.COLOR_MAGENTA, curses.COLOR_BLACK)  # Test realm
 
     # Define accounts and characters from the config
     accounts = config.get('accounts', {})
@@ -89,12 +125,16 @@ def main(stdscr, config):
 
     current_column = 0
     current_item = 0
-    message = ""
+    realm = config.get('default_realm', PRIME)
+    if realm not in REALM_ORDER:
+        logger.warning(f"Unknown default_realm {realm!r}; falling back to {PRIME}")
+        realm = PRIME
+    message = "Enter=login  t=toggle server  r=refresh  Esc=quit"
 
     # Get initial online status for all characters
-    character_statuses = get_character_statuses(columns)
+    character_statuses = get_character_statuses(columns, realm)
 
-    draw_screen(stdscr, columns, current_column, current_item, message, character_statuses)
+    draw_screen(stdscr, columns, current_column, current_item, message, character_statuses, realm)
 
     while True:
         key = stdscr.getch()
@@ -114,15 +154,19 @@ def main(stdscr, config):
                 current_item = 0
         elif key == curses.KEY_ENTER or key == 10 or key == 13:
             selected_char = columns[current_column]['items'][current_item]
-            message = f"Launching {selected_char}"
-            draw_screen(stdscr, columns, current_column, current_item, message, character_statuses)
+            message = f"Launching {selected_char} on {realm.upper()}"
+            draw_screen(stdscr, columns, current_column, current_item, message, character_statuses, realm)
             curses.endwin()
-            launch_gemstone(selected_char)
+            launch_gemstone(selected_char, realm)
             return
-        elif key == ord('r'):
+        elif key in (ord('t'), ord('T')):
+            realm = REALM_ORDER[(REALM_ORDER.index(realm) + 1) % len(REALM_ORDER)]
+            character_statuses = get_character_statuses(columns, realm)
+            message = f"Server: {realm.upper()}"
+        elif key in (ord('r'), ord('R')):
             # Refresh character statuses
-            character_statuses = get_character_statuses(columns)
-            message = "Refreshed character statuses"
+            character_statuses = get_character_statuses(columns, realm)
+            message = f"Refreshed character statuses ({realm.upper()})"
         elif key == curses.KEY_RESIZE:
             stdscr.clear()
             stdscr.refresh()
@@ -130,10 +174,10 @@ def main(stdscr, config):
             curses.endwin()
             sys.exit(0)
 
-        draw_screen(stdscr, columns, current_column, current_item, message, character_statuses)
+        draw_screen(stdscr, columns, current_column, current_item, message, character_statuses, realm)
 
 
-def draw_screen(stdscr, columns, current_column, current_item, message, character_statuses):
+def draw_screen(stdscr, columns, current_column, current_item, message, character_statuses, realm=PRIME):
     stdscr.clear()
     height, width = stdscr.getmaxyx()
     num_columns = len(columns)
@@ -141,10 +185,21 @@ def draw_screen(stdscr, columns, current_column, current_item, message, characte
 
     # Check if the terminal is tall enough
     max_items = max(len(col['items']) for col in columns)
-    if height < max_items + 3:  # Additional space for header and message
+    if height < max_items + 4:  # Additional space for realm banner, header and message
         stdscr.addstr(0, 0, "Terminal window is too small. Please resize.", curses.A_BOLD)
         stdscr.refresh()
         return
+
+    # Realm banner — test is coloured so an accidental test login is obvious
+    banner_style = curses.A_BOLD | (curses.color_pair(4) if realm == TEST else curses.color_pair(2))
+    banner = f" SERVER: {realm.upper()} "
+    if realm != PRIME:
+        banner += f"({' '.join(REALM_FLAGS.get(realm, [])) or 'no flags'}) "
+    banner += " — press 't' to toggle"
+    try:
+        stdscr.addstr(0, 0, banner.ljust(width - 1)[:width - 1], banner_style)
+    except curses.error:
+        pass
 
     for col_index, column in enumerate(columns):
         x = col_index * column_width
@@ -152,30 +207,32 @@ def draw_screen(stdscr, columns, current_column, current_item, message, characte
         # Draw header
         header = column['header']
         try:
-            stdscr.addstr(0, x, header.center(column_width - 1), curses.A_REVERSE)
+            stdscr.addstr(1, x, header.center(column_width - 1), curses.A_REVERSE)
         except curses.error:
             pass  # Ignore errors caused by writing outside the screen
 
         # Draw items
         for item_index, item in enumerate(column['items']):
-            y = item_index + 1
+            y = item_index + 2
             if y >= height - 1:
                 continue  # Skip if beyond screen height
 
             status = character_statuses.get(item)
             prefix = "  "
-            style = curses.color_pair(1)
+            attrs = 0
 
             if col_index == current_column and item_index == current_item:
-                style |= curses.A_BOLD
+                attrs |= curses.A_BOLD
                 prefix = "> "
 
-            # Add [Online] status if character is online
+            # Add [Online] status if character is online in the selected realm.
+            # Colour pairs are assigned, never OR'd: pair(1) | pair(2) is pair(3).
             if status and status.online:
                 item_display = f"{item} [Online]"
-                style |= curses.color_pair(2)  # Green text
+                style = curses.color_pair(2) | attrs  # Green text
             else:
                 item_display = item
+                style = curses.color_pair(1) | attrs
 
             try:
                 stdscr.addstr(y, x, (prefix + item_display).ljust(column_width - 1), style)
@@ -191,17 +248,17 @@ def draw_screen(stdscr, columns, current_column, current_item, message, characte
     stdscr.refresh()
 
 
-def get_character_statuses(columns) -> Dict[str, CharacterStatus]:
+def get_character_statuses(columns, realm: str = PRIME) -> Dict[str, CharacterStatus]:
     statuses = {}
     process_output = get_process_list()
 
     for column in columns:
         for char in column['items']:
-            port = lookup_char_port(char, process_output)
+            port = lookup_char_port(char, process_output, realm)
             online = port != 0
             statuses[char] = CharacterStatus(name=char, online=online, port=port)
             if DEBUG:
-                logger.debug(f"Character {char} - Online: {online}, Port: {port}")
+                logger.debug(f"Character {char} ({realm}) - Online: {online}, Port: {port}")
 
     return statuses
 
@@ -215,43 +272,57 @@ def get_process_list() -> str:
         return ""
 
 
-def lookup_char_port(char: str, process_output: str) -> int:
-    # Make the regex case-insensitive and more flexible
+def lookup_char_port(char: str, process_output: str, realm: str = PRIME) -> int:
+    """Port of a running Lich backend for this character *in this realm*.
+
+    A character can legitimately be logged into prime and test at the same
+    time, so the realm's flags have to be part of the match — otherwise the
+    launcher would happily attach a prime request to a live test session.
+    """
     pattern = re.compile(rf'--login\s+{re.escape(char)}\s+.*?--detachable-client=(\d+)', re.IGNORECASE)
-    matches = pattern.findall(process_output)
-    if matches:
-        port = int(matches[0])
-        return port
+    other_flags = {flag for other, flags in REALM_FLAGS.items() if other != realm for flag in flags}
+    wanted_flags = REALM_FLAGS.get(realm, [])
+    # Flags unique to some *other* realm disqualify a line; a realm with no
+    # flags of its own (prime) is identified by the absence of those.
+    disqualifying = [flag for flag in other_flags if flag not in wanted_flags]
+
+    for line in process_output.splitlines():
+        match = pattern.search(line)
+        if not match:
+            continue
+        if any(flag in line.split() for flag in disqualifying):
+            continue
+        if not all(flag in line.split() for flag in wanted_flags):
+            continue
+        return int(match.group(1))
 
     if DEBUG:
-        logger.debug(f"No match found for character {char} in process list")
-        # Uncomment the following line to print the entire process list for debugging
-        # logger.debug(f"Process list: {process_output}")
+        logger.debug(f"No match found for character {char} ({realm}) in process list")
 
     return 0
 
 
-def launch_gemstone(char: str):
+def launch_gemstone(char: str, realm: str = PRIME):
     os.environ['TERM'] = 'screen-256color'
 
     if os.getenv('DISPLAY', '') == '':
         os.environ['DISPLAY'] = ':0'
         logger.info("Detected empty DISPLAY setting, defaulting to :0")
 
-    logger.info(f"Attempting to login as {char}...")
+    logger.info(f"Attempting to login as {char} on the {realm} server...")
 
     port = 8000
     process_output = get_process_list()
-    if is_character_running(char, process_output):
-        port = lookup_char_port(char, process_output)
-        logger.info(f"Detecting existing connection on port {port}")
+    if is_character_running(char, process_output, realm):
+        port = lookup_char_port(char, process_output, realm)
+        logger.info(f"Detecting existing {realm} connection on port {port}")
     else:
         existing_clients = get_existing_clients()
         if existing_clients:
             max_port = max(existing_clients)
             port = max_port + 1
         logger.info(f"Detecting existing clients but no connection for this character. Using Port[{port}]")
-        start_lich_backend(char, port)
+        start_lich_backend(char, port, realm)
         # Wait for Lich's FE listener PASSIVELY (/proc/net/tcp) — never by
         # connecting: Lich's detachable listener is single-client, and a
         # connect probe landing mid-login wedges its accept loop.
@@ -281,8 +352,8 @@ def wait_for_port_listen(port: int, timeout: float = 120.0) -> bool:
     return False
 
 
-def is_character_running(char: str, process_output: str) -> bool:
-    return lookup_char_port(char, process_output) != 0
+def is_character_running(char: str, process_output: str, realm: str = PRIME) -> bool:
+    return lookup_char_port(char, process_output, realm) != 0
 
 
 def get_existing_clients() -> List[int]:
@@ -297,7 +368,7 @@ def get_existing_clients() -> List[int]:
         return []
 
 
-def start_lich_backend(char: str, port: int):
+def start_lich_backend(char: str, port: int, realm: str = PRIME):
     lich_path = os.path.abspath(LICH_BIN)
     cmd = [
         'ruby',
@@ -307,6 +378,8 @@ def start_lich_backend(char: str, port: int):
         f'--detachable-client={port}',
         '--without-frontend'
     ]
+    cmd.extend(REALM_FLAGS.get(realm, []))
+    logger.info(f"Starting Lich backend: {' '.join(cmd)}")
     try:
         subprocess.Popen(cmd, stderr=subprocess.PIPE)
     except Exception as e:
@@ -344,6 +417,7 @@ def connect_to_lich(char: str, port: int):
 if __name__ == '__main__':
     config = load_config()
     init_paths(config)
+    init_realms(config)
     try:
         curses.wrapper(main, config)
     except KeyboardInterrupt:

@@ -166,6 +166,28 @@ python launcher.py
 
 Once the script is running, you'll see a terminal-based interface displaying your accounts and characters.
 
+| Key | Action |
+| --- | --- |
+| Arrow keys | Move between accounts and characters |
+| `Enter` | Log the selected character in |
+| `t` | Toggle between the **prime** and **test** servers |
+| `r` | Refresh online status |
+| `Esc` | Quit |
+
+### Prime vs. test server
+
+A banner across the top of the screen always shows which server you're about to
+log into — green for prime, magenta for test. Press `t` to toggle; the `[Online]`
+markers refresh to show who is logged in *on that server*, since a character can
+be on prime and test at the same time and each gets its own Profanity port.
+
+Test logins pass `--gemstone --test` to Lich, which resolves to game code `GST`.
+Lich falls back to your existing prime (`GS3`) saved entry for that character, so
+you do **not** need to add separate saved logins for the test server.
+
+To start the launcher on the test server by default, set `default_realm: test` in
+`config.yaml`.
+
 ## Important Notes
 
 - **Terminal Size:** Ensure your terminal window is large enough to display the interface. If it's too small, you'll be prompted to resize.
