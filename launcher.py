@@ -8,6 +8,8 @@ import re
 import subprocess
 import sys
 import time
+import threading
+import socket
 from typing import List, Dict
 
 import yaml  # Import PyYAML to parse the config file
@@ -15,12 +17,19 @@ import yaml  # Import PyYAML to parse the config file
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+# Persist launcher diagnostics; frontend output may contain browser credentials.
+file_handler = logging.FileHandler(os.path.join(os.path.dirname(__file__), 'gempy.log'))
+file_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
+logger.addHandler(file_handler)
 
 # Constants for Lich and Profanity binaries will be set from the config file
 LICH_BIN = ""
+VELLUM_BIN = ""
+FRONTEND = "profanity"
 PROFANITY_BIN = ""
 PROFANITY_TEMPLATE = ""  # optional bundled template (used when no ~/.profanity/<char>.xml exists)
 DEBUG = True  # Set to False to disable debug output
+TERMINAL_SERVICE = None
 
 # Configuration file path
 CONFIG_FILE = 'config.yaml'
@@ -34,7 +43,7 @@ PRIME = 'prime'
 TEST = 'test'
 REALM_ORDER = [PRIME, TEST]
 DEFAULT_REALM_FLAGS = {
-    PRIME: [],                        # saved entry's own instance (GS3)
+    PRIME: ['--gemstone'],           # GS3: modern Lich requires an explicit game
     TEST: ['--gemstone', '--test'],   # GST
 }
 REALM_FLAGS = dict(DEFAULT_REALM_FLAGS)
@@ -76,28 +85,24 @@ def init_realms(config):
 
 
 def init_paths(config):
-    global LICH_BIN, PROFANITY_BIN, PROFANITY_TEMPLATE
+    global LICH_BIN, PROFANITY_BIN, PROFANITY_TEMPLATE, VELLUM_BIN, FRONTEND
 
+    FRONTEND = config.get('frontend', 'profanity')
+    if FRONTEND not in ('profanity', 'vellum_despana', 'vellum_web', 'vellum_gui', 'vellum_tui', 'saga'):
+        raise ValueError('Unknown frontend')
     paths = config.get('paths', {})
+    VELLUM_BIN = paths.get('vellum_bin', '')
     LICH_BIN = paths.get('lich_bin', '')
     PROFANITY_BIN = paths.get('profanity_bin', '')
     PROFANITY_TEMPLATE = config.get('profanity_template', '')
 
-    if not LICH_BIN or not PROFANITY_BIN:
-        logger.error("LICH_BIN and PROFANITY_BIN paths must be specified in the configuration file.")
-        sys.exit(1)
-
-    # Verify that the paths exist
-    if not os.path.exists(LICH_BIN):
-        logger.error(f"Error: LICH_BIN path does not exist: {LICH_BIN}")
-        sys.exit(1)
-    if not os.path.exists(PROFANITY_BIN):
-        logger.error(f"Error: PROFANITY_BIN path does not exist: {PROFANITY_BIN}")
-        sys.exit(1)
-
-    if DEBUG:
-        logger.debug(f"LICH_BIN set to: {LICH_BIN}")
-        logger.debug(f"PROFANITY_BIN set to: {PROFANITY_BIN}")
+    frontend_bin = VELLUM_BIN if FRONTEND.startswith('vellum_') else PROFANITY_BIN
+    if FRONTEND == 'saga':
+        from client_options import saga_binary
+        frontend_bin = saga_binary(config)
+    for path in (LICH_BIN, frontend_bin):
+        if not path or not os.path.isfile(path):
+            raise ValueError(f"Missing configured binary: {path}")
 
 
 class CharacterStatus:
@@ -157,8 +162,12 @@ def main(stdscr, config):
             message = f"Launching {selected_char} on {realm.upper()}"
             draw_screen(stdscr, columns, current_column, current_item, message, character_statuses, realm)
             curses.endwin()
-            launch_gemstone(selected_char, realm)
-            return
+            launched = launch_gemstone(selected_char, realm)
+            if FRONTEND in ('profanity', 'vellum_tui'):
+                return
+            stdscr.refresh()
+            character_statuses = get_character_statuses(columns, realm)
+            message = "Enter=login  t=toggle server  r=refresh  Esc=quit" if launched else "Startup failed; see gempy.log. Enter=retry  Esc=quit"
         elif key in (ord('t'), ord('T')):
             # The status-bar tag already reports the realm, so leave the
             # message as the key hint rather than echoing it twice.
@@ -251,6 +260,15 @@ def draw_screen(stdscr, columns, current_column, current_item, message, characte
 
 def get_character_statuses(columns, realm: str = PRIME) -> Dict[str, CharacterStatus]:
     statuses = {}
+    if TERMINAL_SERVICE is not None:
+        sessions = TERMINAL_SERVICE.sessions()
+        for column in columns:
+            for char in column['items']:
+                match = next((session for session in sessions
+                              if session['character'].lower() == char.lower()
+                              and session['realm'] == realm), None)
+                statuses[char] = CharacterStatus(char, bool(match), match['port'] if match else 0)
+        return statuses
     process_output = get_process_list()
 
     for column in columns:
@@ -282,7 +300,8 @@ def lookup_char_port(char: str, process_output: str, realm: str = PRIME) -> int:
     """
     pattern = re.compile(rf'--login\s+{re.escape(char)}\s+.*?--detachable-client=(\d+)', re.IGNORECASE)
     other_flags = {flag for other, flags in REALM_FLAGS.items() if other != realm for flag in flags}
-    wanted_flags = REALM_FLAGS.get(realm, [])
+    wanted_flags = [flag for flag in REALM_FLAGS.get(realm, []) if flag not in ('--gemstone', '--gs')]
+    other_flags.difference_update(('--gemstone', '--gs'))
     # Flags unique to some *other* realm disqualify a line; a realm with no
     # flags of its own (prime) is identified by the absence of those.
     disqualifying = [flag for flag in other_flags if flag not in wanted_flags]
@@ -311,6 +330,19 @@ def launch_gemstone(char: str, realm: str = PRIME):
         logger.info("Detected empty DISPLAY setting, defaulting to :0")
 
     logger.info(f"Attempting to login as {char} on the {realm} server...")
+    if TERMINAL_SERVICE is not None:
+        try:
+            if FRONTEND in ('vellum_gui', 'vellum_web', 'saga'):
+                result = TERMINAL_SERVICE.launch(char, realm, FRONTEND)
+                if FRONTEND == 'vellum_web':
+                    import webbrowser
+                    webbrowser.open(f"http://127.0.0.1:{result['web_port']}{result['pairing_path']}")
+                return True
+            session = TERMINAL_SERVICE.ensure_backend(char, realm)
+            return connect_to_lich(char, session['port'], realm)
+        except Exception:
+            logger.error('Unable to prepare the game session; check Lich logs.')
+            return False
 
     port = 8000
     process_output = get_process_list()
@@ -323,25 +355,30 @@ def launch_gemstone(char: str, realm: str = PRIME):
             max_port = max(existing_clients)
             port = max_port + 1
         logger.info(f"Detecting existing clients but no connection for this character. Using Port[{port}]")
-        start_lich_backend(char, port, realm)
+        backend = start_lich_backend(char, port, realm)
+        if not backend:
+            return False
         # Wait for Lich's FE listener PASSIVELY (/proc/net/tcp) — never by
         # connecting: Lich's detachable listener is single-client, and a
         # connect probe landing mid-login wedges its accept loop.
-        if not wait_for_port_listen(port):
+        if not wait_for_port_listen(port, process=backend):
             logger.error(f"Lich never opened port {port} — check login/flags (is the character name in Lich's saved entries?)")
             return
         time.sleep(2)  # let login settle before the FE attaches
 
-    connect_to_lich(char, port)
+    return connect_to_lich(char, port, realm)
 
 
-def wait_for_port_listen(port: int, timeout: float = 120.0) -> bool:
+def wait_for_port_listen(port: int, timeout: float = 120.0, process=None) -> bool:
     """True once 127.0.0.1:<port> is in LISTEN state, checked passively
     via /proc/net/tcp{,6} (state 0A), polling until timeout."""
     hex_port = format(port, '04X')
     pattern = re.compile(rf':{hex_port} [0-9A-F]+:0+ 0A ', re.IGNORECASE)
     deadline = time.time() + timeout
     while time.time() < deadline:
+        if process is not None and process.poll() is not None:
+            logger.error("Lich exited before opening port %s (status %s); check Ruby requirements and Lich logs", port, process.returncode)
+            return False
         for path in ('/proc/net/tcp', '/proc/net/tcp6'):
             try:
                 with open(path, 'r') as f:
@@ -359,7 +396,7 @@ def is_character_running(char: str, process_output: str, realm: str = PRIME) -> 
 
 def get_existing_clients() -> List[int]:
     try:
-        output = subprocess.check_output(['ps', 'a'], universal_newlines=True)
+        output = subprocess.check_output(['ps', 'ax'], universal_newlines=True)
         pattern = re.compile(r'--detachable-client=(\d+)')
         matches = pattern.findall(output)
         ports = [int(port) for port in matches]
@@ -382,12 +419,51 @@ def start_lich_backend(char: str, port: int, realm: str = PRIME):
     cmd.extend(REALM_FLAGS.get(realm, []))
     logger.info(f"Starting Lich backend: {' '.join(cmd)}")
     try:
-        subprocess.Popen(cmd, stderr=subprocess.PIPE)
+        return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     except Exception as e:
         logger.error(f"Error starting Lich backend: {e}")
+        return False
 
 
-def connect_to_lich(char: str, port: int):
+def allocate_web_port():
+    # Older Vellum binaries format the browser URL from the configured port,
+    # so port zero opens an unusable URL. Allocate a real loopback port here.
+    with socket.socket() as listener:
+        listener.bind(('127.0.0.1', 0))
+        return listener.getsockname()[1]
+
+
+def vellum_command(char: str, port: int, realm: str = PRIME):
+    return [os.path.abspath(VELLUM_BIN), '--launch-profile',
+            f'gempy-{char}-{realm}', '--port', str(port), '--host', '127.0.0.1',
+            '--web-port', str(allocate_web_port()), '--web-bind', '0.0.0.0']
+
+
+def connect_to_lich(char: str, port: int, realm: str = PRIME):
+    if FRONTEND == 'vellum_tui':
+        from client_options import vellum_command as native_command
+        subprocess.run(native_command(os.path.abspath(VELLUM_BIN), char, realm, port, 'tui'), check=True)
+        return True
+    if FRONTEND == 'vellum_despana':
+        try:
+            # Vellum owns browser opening. Discard output containing pairing URLs;
+            # its exit status records startup failures without logging secrets.
+            process = subprocess.Popen(vellum_command(char, port, realm),
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, start_new_session=True)
+            def monitor():
+                status = process.wait()
+                if status:
+                    logger.error("Vellum exited for %s (%s), status %s", char, realm, status)
+            threading.Thread(target=monitor, daemon=True).start()
+            time.sleep(1)
+            if process.poll() is not None:
+                return False
+            return True
+        except OSError:
+            logger.error("Unable to start Vellum for %s (%s)", char, realm)
+            return False
+
     profanity_path = os.path.abspath(PROFANITY_BIN)
     # A per-character layout in ~/.profanity/ always wins; the configured
     # template is only the fallback for characters without one (profanity's
@@ -415,10 +491,40 @@ def connect_to_lich(char: str, port: int):
     logger.error("Failed to connect after 10 attempts")
 
 
-if __name__ == '__main__':
+def cli():
+    global TERMINAL_SERVICE
+    import argparse
+    parser = argparse.ArgumentParser(description="Gempy terminal launcher and web daemon")
+    parser.add_argument('--web', action='store_true', help='run the persistent web service')
+    parser.add_argument('--host', default='127.0.0.1', help='web bind address (default: loopback)')
+    parser.add_argument('--port', type=int, default=8080, help='web port (default: 8080)')
+    parser.add_argument('--set-password', action='store_true', help='set the Gempy administrator password')
+    args = parser.parse_args()
+    if not 1 <= args.port <= 65535:
+        parser.error('--port must be between 1 and 65535')
+    if args.set_password:
+        from web_app import setup_password
+        try:
+            setup_password()
+        except ValueError as error:
+            parser.error(str(error))
+        return
     config = load_config()
+    if args.web:
+        from web_app import create_app
+        import uvicorn
+        # A single process owns coordinated launch and operation locks.
+        try:
+            app = create_app(config, config_path=CONFIG_FILE)
+        except RuntimeError as error:
+            parser.error(str(error))
+        uvicorn.run(app, host=args.host, port=args.port, workers=1,
+                    access_log=False)
+        return
     init_paths(config)
     init_realms(config)
+    from gempy_service import Service
+    TERMINAL_SERVICE = Service(config)
     try:
         curses.wrapper(main, config)
     except KeyboardInterrupt:
@@ -428,3 +534,7 @@ if __name__ == '__main__':
         curses.endwin()
         logger.error(f"An unexpected error occurred: {e}")
         sys.exit(1)
+
+
+if __name__ == '__main__':
+    cli()

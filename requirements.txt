@@ -1,3 +1,4 @@
-# requirements.txt
-
 PyYAML>=5.1
+FastAPI>=0.115,<1
+uvicorn>=0.30,<1
+websocket-client>=1.8,<2

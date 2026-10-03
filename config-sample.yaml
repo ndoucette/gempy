@@ -35,10 +35,34 @@ accounts:
 # be paired with '--gemstone': on its own, Lich fails instance resolution and
 # refuses the login.
 # realms:
-#   prime: []                        # uses the saved entry's own instance (GS3)
+#   prime: ["--gemstone"]             # GS3
 #   test: ["--gemstone", "--test"]   # GST
 
 # Optional: bundled ProfanityFE template used for characters that have no
 # ~/.profanity/<char>.xml (per-char files always win). default.xml is a
 # DragonRealms layout; GemStone options: original.xml, tysong.xml, eleazzar.xml
 # profanity_template: original.xml
+
+# Vellum Despana alternative (profanity remains the default):
+# frontend: vellum_despana
+# Add paths.vellum_bin: /home/nick/gs4/vellum-fe
+# Create launcher.toml profiles named gempy-<Character>-prime and
+# gempy-<Character>-test with mode="lich", web_client="despana",
+# host="127.0.0.1", web_bind="127.0.0.1", web_port=0.
+
+# Web daemon: set paths.vellum_bin to your installed Vellum executable.
+# Run ./run.sh --set-password once, then ./run.sh --web.
+# LAN/Tailscale: ./run.sh --web --host 0.0.0.0 --port 8080
+# Both Gempy and Vellum web ports must be reachable from the browser.
+# No web login password belongs in this configuration file.
+
+# Client choices in the web interface are independent of the terminal default.
+# Terminal alternatives: frontend: vellum_gui, vellum_tui, vellum_web, or saga.
+# Native desktop/terminal clients open on the machine running Gempy.
+# Saga is experimental and must be closed before a new attachment.
+# paths:
+#   saga_bin: '/opt/Saga/saga'  # executable or Linux AppImage
+# Windows/WSL also discovers C:/Program Files/Saga/Saga.exe automatically.
+# Optional terminal emulator argv (no shell string):
+# clients:
+#   terminal_command: ['xterm', '-e']
