@@ -1,10 +1,18 @@
 ## Persistent web service
 
-The web workspace shows sessions at the top, with a searchable character roster below.
+The web workspace has **Live**, **Progress**, **Characters**, and **Settings** views.
+Live combines session/client controls with reported character vitals, location,
+injuries, effects and experience. Progress retains XP history for offline characters,
+with today/week/month/year totals and custom date ranges. Settings manages reporter
+tokens, Saga history imports, SQLite backups, timezone/day rollover and display defaults.
+See [MIGRATION.md](MIGRATION.md) for reporter installation, pilot and KoboldMonitor cutover.
+
 Use **Add a character** to enter a character name already saved in Lich and choose
 an existing account label or create a new one. Account labels organize the roster;
 Lich uses its saved login for authentication. Additions are saved to `config.yaml`
-and are available immediately, including after restarting Gempy.
+and are available immediately, including after restarting Gempy. **Edit** moves or
+corrects a roster entry; **Rename** changes an account label. These labels organize
+the roster, while Lich continues to own saved game credentials.
 
 The terminal launcher remains available with `./run.sh`. For a Linux web daemon,
 configure your existing Lich saved logins and set `paths.vellum_bin` to the
@@ -27,10 +35,10 @@ revoke existing Gempy login sessions.
 
 The **Characters** tab lists configured accounts and lets you choose Prime or
 Test before launching. A launch reuses a matching running Lich session. The
-**Sessions** tab also discovers local sessions started outside Gempy and shows
+**Live** view also discovers local sessions started outside Gempy and shows
 **Attached**, **Headless**, or **Unknown** client status. **Open/Attach client**
 opens Despana in a new tab; allow pop-ups for Gempy if your browser blocks it.
-Status refreshes every three seconds. Attachment is checked passively and is not
+Status refreshes every three seconds by default, configurable in Settings. Attachment is checked passively and is not
 a measure of open browser tabs.
 
 **Disconnect** asks for confirmation and requests an orderly Lich exit. Allow

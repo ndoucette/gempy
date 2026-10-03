@@ -1,0 +1,302 @@
+=begin
+Gempy live telemetry reporter, version 1.0.0. Requires Lich 5.11+.
+;gempy_reporter --url=http://127.0.0.1:8080/api/telemetry/update --token=TOKEN
+Settings are character-specific and separate from kmon/Saga settings.
+=end
+require 'net/http'
+require 'json'
+require 'uri'
+require 'securerandom'
+no_kill_all
+no_pause_all
+hide_me
+silence_me
+
+module GempyReporter
+  VERSION = '1.0.0'.freeze
+  AREAS = %w[nsys head neck chest abdomen back leftArm rightArm leftHand rightHand leftLeg rightLeg leftFoot rightFoot leftEye rightEye].freeze
+  @settings = { 'url' => 'http://127.0.0.1:8080/api/telemetry/update', 'interval' => 3,
+                'command_interval' => 120, 'enabled' => true }.merge(CharSettings[:gempy_reporter] || {})
+  @reporter_id = SecureRandom.uuid
+  @sequence = 0
+  @experience = {}
+  @bonuses = {}
+  @availability = {}
+  @started = Time.now
+  @samples = []
+  @last_error = Time.at(0)
+  @hook_id = "gempy_reporter_#{@reporter_id}"
+
+  def self.safe
+    yield
+  rescue StandardError
+    nil
+  end
+
+  def self.available?(value)
+    return value.values.any? { |item| available?(item) } if value.is_a?(Hash)
+    return true if value.is_a?(Array) # A successfully read empty effect list is known empty.
+    !value.nil?
+  end
+
+  def self.section(name)
+    result = yield
+    @availability[name] = { available: available?(result), collected_at: Time.now.to_i }
+    result
+  rescue StandardError
+    @availability[name] = { available: false, collected_at: Time.now.to_i }
+    nil
+  end
+
+  def self.configure
+    Script.current.vars[1..-1].each do |arg|
+      case arg
+      when /\A--(url|token|legacy-url)=(.+)\z/
+        @settings[Regexp.last_match(1)] = Regexp.last_match(2)
+      when /\A--(interval|command-interval)=(\d+)\z/
+        key = Regexp.last_match(1).tr('-', '_')
+        @settings[key] = [Regexp.last_match(2).to_i, key == 'interval' ? 2 : 30].max
+      when '--enable' then @settings['enabled'] = true
+      when '--disable' then @settings['enabled'] = false
+      when '--clear-legacy' then @settings.delete('legacy-url')
+      when '--help'
+        respond 'Gempy: --url=URL --token=TOKEN --interval=3 --command-interval=120 --enable --disable'
+        respond 'Optional migration: --legacy-url=OLD_ENDPOINT; --clear-legacy stops dual reporting.'
+        exit
+      end
+    end
+    CharSettings[:gempy_reporter] = @settings
+    raise 'Configure --token using the Gempy Settings reporter token first.' if @settings['enabled'] && @settings['token'].to_s.empty?
+  end
+
+  # Observe native XML and command output without suppressing or modifying game traffic.
+  def self.observe(line)
+    now = Time.now.to_i
+    if line.include?("dialogData id='expr'") || line.include?('dialogData id="expr"')
+      { 'exp' => :lifetime_exp, 'ascension_exp' => :ascension_exp, 'field_exp' => :field_experience_current,
+        'max_field_exp' => :field_experience_max, 'until_next' => :exp_to_next_tp }.each do |attr, key|
+        @experience[key] = Regexp.last_match(1).to_i if line =~ /\b#{attr}=['"](\d+)['"]/
+      end
+      if line =~ /fashlonae=['"](\d+)['"]/
+        raw = Regexp.last_match(1).to_i
+        @bonuses[:fashlonae_raw] = raw
+        @bonuses[:fashlonae_state] = { 0 => 'ineligible', 1 => 'eligible', 2 => 'active' }[raw]
+        @bonuses[:fashlonae_source] = 'native_dialog'
+      end
+      if @native_sample && now - @native_sample[0] <= 10 && @experience[:lifetime_exp] && @experience[:ascension_exp]
+        gain = @experience[:lifetime_exp] - @native_sample[1] + @experience[:ascension_exp] - @native_sample[2]
+        if gain > 0
+          @last_pulse = gain
+          @best_pulse = [@best_pulse || 0, gain].max
+        end
+      end
+      @native_sample = [now, @experience[:lifetime_exp], @experience[:ascension_exp]] if @experience[:lifetime_exp] && @experience[:ascension_exp]
+      @experience[:observed_at] = now
+    end
+    { /\bExperience:\s*([\d,]+)/ => :lifetime_exp, /Ascension Exp:\s*([\d,]+)/ => :ascension_exp,
+      /Total Exp:\s*([\d,]+)/ => :total_exp, /Long-Term Exp:\s*([\d,]+)/ => :long_term_exp,
+      /Exp to next TP:\s*([\d,]+)/ => :exp_to_next_tp, /Exp to next ATP:\s*([\d,]+)/ => :exp_to_next_atp,
+      /\bATPs:\s*([\d,]+)/ => :total_atps }.each do |pattern, key|
+      if line =~ pattern
+        @experience[key] = Regexp.last_match(1).delete(',').to_i
+        @experience[:observed_at] = now
+      end
+    end
+    if line =~ %r{PTPs/MTPs:\s*(\d+)/(\d+)}
+      @experience[:physical_training_points], @experience[:mental_training_points] = Regexp.last_match.captures.map(&:to_i)
+    end
+    if line =~ /Your recent adventures echo powerfully in your mind|You feel a strange sense of serenity/
+      @bonuses[:rpa] = true
+      @bonuses[:rpa_observed_at] = now
+    end
+    @bonuses[:fashlonae_state] = 'active' if line.include?('You feel a heightened understanding of events around you.')
+    @bonuses[:fashlonae_state] = 'eligible' if line.include?('The feeling of heightened understanding departs')
+    @bonuses[:fashlonae_state] = 'ineligible' if line.include?("not presently receiving Fash'lo'nae's Tutelage")
+    if line =~ /receiving Fash'lo'nae's Tutelage with ([\d,]+) day/
+      @bonuses[:fashlonae_state] = 'eligible'
+      @bonuses[:fashlonae_days_remaining] = Regexp.last_match(1).delete(',').to_i
+    end
+    if line =~ /Your Gift of Lumnis|It is scheduled to refresh|restart as soon as you absorb experience|Because your account is free,/
+      @bonuses[:lumnis_text] = line.gsub(/<[^>]*>/, '').strip
+      @bonuses[:observed_at] = now
+      if line =~ /([\d,]+)\s+points? of (tripled|doubled|quadrupled|quintupled) experience/
+        @bonuses[:lumnis_points_remaining] = Regexp.last_match(1).delete(',').to_i
+        @bonuses[:lumnis_stage] = { 'doubled' => 2, 'tripled' => 3, 'quadrupled' => 4, 'quintupled' => 5 }[Regexp.last_match(2)]
+      end
+      reset = line.split('It is scheduled to refresh', 2)[1]
+      if reset
+        seconds = reset[/(\d+)\s*days?/, 1].to_i * 86400 + reset[/(\d+)\s*hours?/, 1].to_i * 3600 + reset[/(\d+)\s*minutes?/, 1].to_i * 60
+        @bonuses[:lumnis_reset_at] = now + seconds if seconds > 0
+      end
+      @bonuses[:lumnis_stage] = 'ready' if line.include?('restart as soon as you absorb experience')
+      @bonuses[:lumnis_stage] = 'expired' if line.include?('Your Gift of Lumnis has expired for this week')
+    end
+    if line =~ /You have made ([\d,]+) recent donations to the Temple of Lumnis/
+      @bonuses[:lumnis_donations] = Regexp.last_match(1).delete(',').to_i
+    elsif line.include?('You have not made any recent donations to the Temple of Lumnis')
+      @bonuses[:lumnis_donations] = 0
+    end
+    if line =~ /You currently are enlightened, earning \+50% base experience until (.+?) elven time standard/
+      @bonuses[:exp_scroll_expires_elven] = Regexp.last_match(1)
+    end
+    line
+  rescue StandardError
+    line
+  end
+
+  def self.collect
+    @sequence += 1
+    data = { schema_version: 1, reporter_id: @reporter_id, sequence: @sequence, pid: Process.pid,
+             realm: XMLData.game, collected_at: Time.now.to_i }
+    data[:process_start] = safe { File.read('/proc/self/stat').split(') ', 2)[1].split[19].to_i }
+    data.delete(:process_start) if data[:process_start].nil?
+    data[:character] = section('character') { { name: Char.name, level: Stats.level, profession: Stats.prof } }
+    data[:vitals] = section('vitals') do
+      %i[health mana stamina spirit].to_h do |kind|
+        [kind, { current: safe { Char.send(kind) }, max: safe { Char.send("max_#{kind}") }, percent: safe { Char.send("percent_#{kind}") } }]
+      end
+    end
+    data[:status] = section('status') do
+      { stance: 'stance', mindstate: 'mind', encumbrance: 'encumbrance' }.to_h do |key, prefix|
+        [key, { text: safe { XMLData.send("#{prefix}_text") }, value: safe { XMLData.send("#{prefix}_value") } }]
+      end
+    end
+    data[:location] = section('location') { room = Room.current; room && { room_id: room.id, room_title: room.title } }
+    data[:injuries] = section('injuries') do
+      { wounds: AREAS.to_h { |area| [area, safe { Wounds.send(area) }] }, scars: AREAS.to_h { |area| [area, safe { Scars.send(area) }] } }
+    end
+    data[:effects] = section('effects') do
+      %i[spells buffs debuffs cooldowns].to_h do |kind|
+        effects = safe do
+          Effects.const_get(kind.to_s.capitalize).to_h.filter_map do |name, expiry|
+            next if name.is_a?(Integer) || expiry <= Time.now
+            { name: name, end_time: expiry.to_i, remaining_seconds: (expiry - Time.now).to_i }
+          end.sort_by { |effect| effect[:remaining_seconds] }
+        end
+        [kind, effects]
+      end
+    end
+    data[:resources] = section('resources') do
+      resource = { type: safe { Resources.type }, weekly: safe { Resources.weekly }, total: safe { Resources.total },
+                   voln_favor: safe { Society.status =~ /Voln/ ? Resources.voln_favor : nil } }
+      resource.merge!(max_weekly: 50_000, max_total: 200_000) unless resource[:weekly].nil? && resource[:total].nil?
+      resource
+    end
+    data[:experience] = section('experience') do
+      exp = @experience.dup
+      exp[:lifetime_exp] = safe { Stats.exp } || exp[:lifetime_exp]
+      exp[:field_experience_current] = safe { Experience.fxp_current }
+      exp[:field_experience_max] = safe { Experience.fxp_max }
+      exp[:ascension_exp] = safe { Experience.axp } || exp[:ascension_exp]
+      exp[:ascension_experience] = exp[:ascension_exp]
+      exp[:next_level_percent] = safe { XMLData.next_level_value }
+      text = safe { XMLData.next_level_text }
+      exp[:experience_to_next_level] = text && text[/([\d,]+) (?:experience|until next level)/, 1]&.delete(',')&.to_i
+      # Lifetime counters survive level transitions; do not infer XP from a wrapping progress bar.
+      total = exp[:lifetime_exp] && exp[:ascension_exp] && exp[:lifetime_exp] + exp[:ascension_exp]
+      if total
+        changed = @samples.empty? || @samples.last[1] != total
+        if !@samples.empty? && total < @samples.last[1]
+          @samples.clear
+          @baseline = total
+          @normal_baseline = exp[:lifetime_exp]
+          @ascension_baseline = exp[:ascension_exp]
+          @started = Time.now
+        end
+        @samples << [Time.now.to_f, total, exp[:ascension_exp]] if changed
+        @baseline ||= total
+        @samples.shift while @samples.length > 1 && @samples[1][0] < Time.now.to_f - 3600
+        elapsed_hours = [(Time.now - @started) / 3600, 1.0 / 60].max
+        @normal_baseline ||= exp[:lifetime_exp]
+        @ascension_baseline ||= exp[:ascension_exp]
+        exp[:normal_hourly_rate] = [((exp[:lifetime_exp] - @normal_baseline) / elapsed_hours).round, 0].max
+        exp[:ascension_hourly_rate] = [((exp[:ascension_exp] - @ascension_baseline) / elapsed_hours).round, 0].max
+        exp[:hourly_rate] = exp[:normal_hourly_rate] + exp[:ascension_hourly_rate]
+        exp[:last_hour_gain] = [total - @samples.first[1], 0].max
+        pulse = @samples.length > 1 ? total - @samples[-2][1] : nil
+        exp[:gain_since_previous_sample] = pulse if changed && pulse && pulse >= 0
+        exp[:last_pulse] = @last_pulse
+        exp[:best_pulse] = @best_pulse
+        exp[:percent_capped] = (exp[:lifetime_exp].fdiv(7_572_500) * 100).round(2)
+        rate = exp[:normal_hourly_rate]
+        exp[:eta_next_tp_seconds] = (exp[:exp_to_next_tp].fdiv(rate) * 3600).round if exp[:exp_to_next_tp] && rate > 0
+        exp[:eta_next_level_seconds] = (exp[:experience_to_next_level].fdiv(rate) * 3600).round if exp[:experience_to_next_level] && rate > 0
+        asc_rate = exp[:ascension_hourly_rate]
+        exp[:eta_next_atp_seconds] = (exp[:exp_to_next_atp].fdiv(asc_rate) * 3600).round if exp[:exp_to_next_atp] && asc_rate > 0
+      end
+      exp
+    end
+    data[:bonuses] = section('bonuses') { @bonuses.dup }
+    data[:daily_tracking] = section('daily_tracking') do
+      { xp_today: safe { UserVars.uberbar_xp_per_day }, xp_history: safe { UserVars.uberbar_xp_history },
+        silver_today: safe { defined?(Ledger) ? Ledger::Character.daily : UserVars.bank_silver_per_day },
+        bounty_points: safe { defined?(BountyHUD) ? BountyHUD.metadata.dig(:earned, :recent) : UserVars.bank_bounty_per_day } }
+    end
+    data[:metadata] = { timestamp: Time.now.to_i, script_version: VERSION, update_interval: @settings['interval'], availability: @availability.dup }
+    data
+  end
+
+  def self.send_to(url, data, token: nil)
+    uri = URI.parse(url)
+    raise 'Reporter URL must use http or https' unless %w[http https].include?(uri.scheme)
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = uri.scheme == 'https'
+    http.open_timeout = 3
+    http.read_timeout = 3
+    http.write_timeout = 3 if http.respond_to?(:write_timeout=)
+    request = Net::HTTP::Post.new(uri.request_uri)
+    request['Content-Type'] = 'application/json'
+    request['Authorization'] = "Bearer #{token}" if token
+    request.body = JSON.generate(data)
+    response = http.request(request)
+    raise "HTTP #{response.code}" unless response.is_a?(Net::HTTPSuccess)
+  end
+
+  # Suppress only the requested report, bounded by its first line and prompt.
+  # Parse the captured lines explicitly so collection does not depend on hook order.
+  def self.refresh_command(command)
+    start = if command == 'lumnis info'
+              /<output class=["']mono["']\s*\/>|Your Gift of Lumnis|You have .*points? of .*experience|Because your account is free,/
+            else
+              /<output class=["']mono["']\s*\/>|^Health: |^Experience: /
+            end
+    lines = Lich::Util.quiet_command_xml(command, start, /<prompt\b/, true, 5)
+    Array(lines).each { |line| observe(line) }
+  end
+
+  def self.main
+    configure
+    return unless @settings['enabled']
+    DownstreamHook.add(@hook_id, proc { |line| observe(line) })
+    before_dying { DownstreamHook.remove(@hook_id); CharSettings[:gempy_reporter] = @settings }
+    echo 'Gempy reporter started; configuration is stored per character.'
+    failures = 0
+    next_command = Time.at(0)
+    command_index = 0
+    loop do
+      begin
+        if Time.now >= next_command
+          refresh_command(['experience', 'lumnis info', 'resource'][command_index % 3])
+          command_index += 1
+          next_command = Time.now + @settings['command_interval']
+        end
+        data = collect
+        send_to(@settings['url'], data, token: @settings['token'])
+        if @settings['legacy-url']
+          safe { send_to(@settings['legacy-url'], data) }
+        end
+        failures = 0
+      rescue StandardError => error
+        failures += 1
+        if Time.now - @last_error > 60
+          echo "Gempy reporter: #{error.class}: #{error.message}. Retrying; game session continues."
+          @last_error = Time.now
+        end
+      end
+      sleep [@settings['interval'] * (2**[failures, 4].min), 60].min
+    end
+  ensure
+    DownstreamHook.remove(@hook_id) rescue nil
+  end
+end
+GempyReporter.main

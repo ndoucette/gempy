@@ -54,6 +54,8 @@ def create_app(config, service=None, directory=None, session_seconds=SESSION_SEC
         service = Service(config)
     directory = Path(directory or state_dir())
     config_path = Path(config_path).expanduser().resolve()
+    from telemetry import TelemetryStore
+    telemetry = TelemetryStore(directory)
     try:
         credentials = json.loads((directory / 'auth.json').read_text())
     except FileNotFoundError:
@@ -66,8 +68,93 @@ def create_app(config, service=None, directory=None, session_seconds=SESSION_SEC
     async def lifespan(app):
         yield
         executor.shutdown(wait=False, cancel_futures=True)
+        telemetry.close()
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+    app.state.telemetry = telemetry
+
+    def reporter_digest():
+        try:
+            return (directory / 'reporter-token.sha256').read_text().strip()
+        except FileNotFoundError:
+            return ''
+
+    @app.post('/api/telemetry/token')
+    def rotate_reporter_token(request: Request):
+        authenticated(request, mutation=True)
+        token = secrets.token_urlsafe(32)
+        temporary = directory / ('reporter-token-' + secrets.token_hex(8))
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, 'w') as stream:
+            stream.write(hashlib.sha256(token.encode()).hexdigest())
+        os.replace(temporary, directory / 'reporter-token.sha256')
+        return {'token': token}
+
+    @app.post('/api/telemetry/update')
+    async def ingest_telemetry(request: Request):
+        authorization = request.headers.get('authorization', '')
+        digest = reporter_digest()
+        if not digest or not authorization.startswith('Bearer ') or not hmac.compare_digest(
+                hashlib.sha256(authorization[7:].encode()).hexdigest(), digest):
+            raise HTTPException(401, 'Invalid reporter token.')
+        raw = bytearray()
+        async for chunk in request.stream():
+            raw.extend(chunk)
+            if len(raw) > 256 * 1024:
+                raise HTTPException(413, 'Telemetry snapshot is too large.')
+        try:
+            body = json.loads(raw)
+            return telemetry.ingest(body, service.sessions())
+        except RecursionError:
+            raise HTTPException(400, 'Telemetry snapshot is too deeply nested.') from None
+        except (ValueError, TypeError) as error:
+            raise HTTPException(400, str(error)) from None
+
+    @app.get('/api/settings')
+    def get_settings(request: Request):
+        authenticated(request)
+        return {**telemetry.settings(), 'reporter_configured': bool(reporter_digest())}
+
+    @app.post('/api/settings')
+    async def change_settings(request: Request):
+        authenticated(request, mutation=True)
+        try:
+            return telemetry.update_settings(await json_body(request))
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from None
+
+    @app.get('/api/progress')
+    def progress(request: Request, period: str = 'week', realm: str | None = None,
+                 character: str | None = None, start: str | None = None, end: str | None = None):
+        authenticated(request)
+        try:
+            return telemetry.progress(period=period, realm=realm, character=character, start=start, end=end)
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from None
+
+    @app.post('/api/history/import')
+    def import_history(request: Request):
+        authenticated(request, mutation=True)
+        lich = config.get('paths', {}).get('lich_bin')
+        roots = [Path(lich).expanduser().resolve().parent / 'data'] if lich else []
+        return telemetry.import_saga(roots)
+
+    @app.get('/api/history/backup')
+    def backup_history(request: Request):
+        authenticated(request)
+        from fastapi.responses import Response
+        # SQLite's backup API provides a consistent snapshot while reporters write.
+        with tempfile.TemporaryDirectory(prefix='gempy-backup-') as temporary:
+            path = Path(temporary) / 'history.sqlite3'
+            telemetry.backup(path)
+            return Response(path.read_bytes(), media_type='application/octet-stream',
+                            headers={'Content-Disposition': 'attachment; filename="gempy-history.sqlite3"'})
+
+    @app.get('/api/reporter/script')
+    def reporter_script(request: Request):
+        authenticated(request)
+        return FileResponse(Path(__file__).parent / 'scripts/gempy_reporter.lic',
+                            filename='gempy_reporter.lic', media_type='text/plain')
 
     def authenticated(request, mutation=False):
         now = time.monotonic()
@@ -103,7 +190,7 @@ def create_app(config, service=None, directory=None, session_seconds=SESSION_SEC
     async def json_body(request):
         try:
             body = await request.json()
-        except (ValueError, UnicodeDecodeError):
+        except (ValueError, UnicodeDecodeError, RecursionError):
             raise HTTPException(400, 'Invalid JSON.') from None
         if not isinstance(body, dict):
             raise HTTPException(400, 'Expected a JSON object.')
@@ -159,15 +246,24 @@ def create_app(config, service=None, directory=None, session_seconds=SESSION_SEC
             return {'accounts': {key: list(value) for key, value in config.get('accounts', {}).items()}, 'realms': ['prime', 'test']}
 
     @app.post('/api/characters')
+    @app.patch('/api/characters')
+    @app.patch('/api/accounts')
     async def add_character(request: Request):
         authenticated(request, True)
         body = await json_body(request)
         character, account = body.get('character'), body.get('account')
-        if not isinstance(character, str) or not re.fullmatch(r'[A-Za-z]{1,50}', character.strip()):
+        rename_account = request.url.path == '/api/accounts'
+        if not rename_account and (not isinstance(character, str) or not re.fullmatch(r'[A-Za-z]{1,50}', character.strip())):
             raise HTTPException(400, 'Use a character name containing only letters (up to 50).')
         if not isinstance(account, str) or not account.strip() or len(account.strip()) > 100 or any(ord(c) < 32 for c in account):
             raise HTTPException(400, 'Use an account label of 1–100 characters.')
-        character, account = character.strip(), account.strip()
+        character, account = character.strip() if isinstance(character, str) else None, account.strip()
+        new_character = body.get('new_character', character)
+        new_account = body.get('new_account')
+        if not rename_account and (not isinstance(new_character, str) or not re.fullmatch(r'[A-Za-z]{1,50}', new_character.strip())):
+            raise HTTPException(400, 'Use a character name containing only letters (up to 50).')
+        if rename_account and (not isinstance(new_account, str) or not new_account.strip() or len(new_account.strip()) > 100 or any(ord(c) < 32 for c in new_account)):
+            raise HTTPException(400, 'Use an account label of 1–100 characters.')
         with lock:
             temporary = None
             try:
@@ -179,10 +275,31 @@ def create_app(config, service=None, directory=None, session_seconds=SESSION_SEC
                 roster = saved.get('accounts') or {}
                 if not isinstance(roster, dict) or any(not isinstance(key, str) or not isinstance(chars, list) or any(not isinstance(char, str) for char in chars) for key, chars in roster.items()):
                     raise ValueError('Invalid roster')
-                if any(char.casefold() == character.casefold() for chars in roster.values() for char in chars):
-                    raise HTTPException(409, 'That character is already in your roster.')
                 account = next((key for key in roster if key.casefold() == account.casefold()), account)
-                roster.setdefault(account, []).append(character)
+                if rename_account:
+                    if account not in roster:
+                        raise HTTPException(404, 'Account label not found.')
+                    new_account = new_account.strip()
+                    if any(key != account and key.casefold() == new_account.casefold() for key in roster):
+                        raise HTTPException(409, 'That account label already exists.')
+                    roster = {new_account if key == account else key: chars for key, chars in roster.items()}
+                    account = new_account
+                elif request.method == 'PATCH':
+                    source_account = next((key for key, chars in roster.items() if any(c.casefold() == character.casefold() for c in chars)), None)
+                    if source_account is None:
+                        raise HTTPException(404, 'Character not found.')
+                    new_character = new_character.strip()
+                    if any(c.casefold() == new_character.casefold() and c.casefold() != character.casefold() for chars in roster.values() for c in chars):
+                        raise HTTPException(409, 'That character is already in your roster.')
+                    roster[source_account] = [c for c in roster[source_account] if c.casefold() != character.casefold()]
+                    roster.setdefault(account, []).append(new_character)
+                    if source_account != account and not roster[source_account]:
+                        del roster[source_account]
+                    character = new_character
+                else:
+                    if any(char.casefold() == character.casefold() for chars in roster.values() for char in chars):
+                        raise HTTPException(409, 'That character is already in your roster.')
+                    roster.setdefault(account, []).append(character)
                 saved['accounts'] = roster
                 # Replace only the accounts section, preserving other settings and comments.
                 document = yaml.compose(source)
@@ -223,7 +340,7 @@ def create_app(config, service=None, directory=None, session_seconds=SESSION_SEC
     @app.get('/api/sessions')
     def list_sessions(request: Request):
         authenticated(request)
-        return {'sessions': service.sessions()}
+        return {'sessions': telemetry.enrich(service.sessions())}
 
     def submit(action, hostname):
         operation_id = secrets.token_urlsafe(16)
