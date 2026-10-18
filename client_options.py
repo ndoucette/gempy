@@ -35,17 +35,30 @@ def terminal_command(config, command):
     raise ValueError('No terminal emulator found. Configure clients.terminal_command or use Connection details.')
 
 
-def saga_environment(port):
+def saga_environment():
+    """Open a normal Saga window, including through its single-process relay.
+
+    Saga 0.10.4 forwards envLichMode but not the host/port to its primary
+    process. Use its per-window Attach to Lich form instead of that handoff.
+    """
     env = os.environ.copy()
-    # No key: Saga sends SET_FRONTEND_PID for Lich's detachable protocol.
-    # A key would select the distinct authenticated proxy handshake.
-    for key in ('SAGA_LICH_KEY', 'SAGA_AUTO_LOGIN', 'SAGA_AUTO_LOGIN_ACCOUNT', 'SAGA_AUTO_LOGIN_MODE'):
+    cleared = ('SAGA_LICH_KEY', 'SAGA_LICH_HOST', 'SAGA_LICH_PORT',
+               'SAGA_AUTO_LOGIN_ACCOUNT', 'SAGA_AUTO_LOGIN_MODE')
+    for key in cleared:
         env.pop(key, None)
-    env.update(SAGA_LICH_MODE='1', SAGA_LICH_HOST='127.0.0.1', SAGA_LICH_PORT=str(port))
-    names = ['SAGA_LICH_MODE', 'SAGA_LICH_HOST', 'SAGA_LICH_PORT']
-    existing = [item for item in env.get('WSLENV', '').split(':') if item and item.split('/')[0] not in names]
+    env.update(SAGA_LICH_MODE='0', SAGA_AUTO_LOGIN='', SAGA_VERSES='0', SAGA_VERSES_READY='')
+    names = ['SAGA_LICH_MODE', 'SAGA_AUTO_LOGIN', 'SAGA_VERSES', 'SAGA_VERSES_READY']
+    existing = [item for item in env.get('WSLENV', '').split(':') if item and item.split('/')[0] not in (*cleared, *names)]
     env['WSLENV'] = ':'.join([*existing, *names])
     return env
+
+
+def saga_connection_details(character, realm, port):
+    return {'client': 'saga', 'character': character, 'realm': realm,
+            'host': '127.0.0.1', 'port': port,
+            'note': 'In the new Saga window, select Via Lich, expand Advanced: attach to a running Lich, '
+                    'choose GemStone IV, enter the host and port below, then select Attach to Lich. '
+                    'This attaches to the character and realm already running in Gempy; no account sign-in is needed.'}
 
 
 def connection_details(character, port):

@@ -1,5 +1,6 @@
 # Copy to ~/.config/systemd/user/gempy.service after replacing both paths.
-# Set the password with ./run.sh --set-password as this user before starting.
+# For a new installation, set the password with ./run.sh --set-password first.
+# Existing installations must keep their configuration and state directory.
 [Unit]
 Description=Gempy web session manager
 After=network.target
@@ -8,8 +9,14 @@ After=network.target
 Type=simple
 WorkingDirectory=/absolute/path/to/gempy
 ExecStart=/absolute/path/to/gempy/run.sh --web --host 0.0.0.0 --port 8080
+# run.sh adds ~/.local/ruby-4.0.3/bin when that runtime is installed.
+Environment="PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment=PYTHONUNBUFFERED=1
+# Set GEMPY_STATE_DIR if migrating from a custom state directory.
+# WSL native clients also need the host's display and Windows interop environment.
 Restart=on-failure
 RestartSec=5
+TimeoutStopSec=30
 # Stop only Gempy; Lich and Vellum must survive daemon restarts.
 KillMode=process
 UMask=0077

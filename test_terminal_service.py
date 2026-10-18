@@ -1,10 +1,30 @@
 """Terminal integration preserves the selected frontend using shared sessions."""
 import unittest
+import contextlib
+import io
 from unittest.mock import Mock, patch
 import launcher
 
 
 class TerminalServiceTests(unittest.TestCase):
+    def test_saga_manual_attachment_instructions_remain_visible(self):
+        service = Mock()
+        service.launch.return_value = {
+            'attachment_pending': True,
+            'connection': {'note': 'Select Via Lich and Attach to Lich.',
+                           'character': 'Example', 'realm': 'test', 'host': '127.0.0.1', 'port': 8123},
+        }
+        output = io.StringIO()
+        with patch.object(launcher, 'TERMINAL_SERVICE', service), \
+             patch.object(launcher, 'FRONTEND', 'saga'), \
+             contextlib.redirect_stdout(output), patch('builtins.input', return_value='') as prompt:
+            self.assertTrue(launcher.launch_gemstone('Example', 'test'))
+        self.assertIn('Example', output.getvalue())
+        self.assertIn('test', output.getvalue())
+        self.assertIn('127.0.0.1', output.getvalue())
+        self.assertIn('8123', output.getvalue())
+        prompt.assert_called_once()
+
     def test_launch_uses_shared_backend_and_terminal_frontend(self):
         service = Mock()
         service.ensure_backend.return_value = {'port': 8123}

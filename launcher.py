@@ -337,6 +337,12 @@ def launch_gemstone(char: str, realm: str = PRIME):
                 if FRONTEND == 'vellum_web':
                     import webbrowser
                     webbrowser.open(f"http://127.0.0.1:{result['web_port']}{result['pairing_path']}")
+                if result.get('attachment_pending'):
+                    details = result['connection']
+                    print(f"Saga: {details['character']} ({details['realm']})")
+                    print(details['note'])
+                    print(f"Host: {details['host']}   Port: {details['port']}")
+                    input('Attach in Saga, then press Enter to return to Gempy. ')
                 return True
             session = TERMINAL_SERVICE.ensure_backend(char, realm)
             return connect_to_lich(char, session['port'], realm)

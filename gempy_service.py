@@ -11,7 +11,7 @@ import subprocess
 import threading
 import time
 from urllib.parse import quote
-from client_options import CLIENTS, connection_details, saga_binary, saga_environment, terminal_command, vellum_command
+from client_options import CLIENTS, connection_details, saga_binary, saga_connection_details, saga_environment, terminal_command, vellum_command
 
 
 DEFAULT_REALM_FLAGS = {'prime': ['--gemstone'], 'test': ['--gemstone', '--test']}
@@ -262,20 +262,6 @@ class Service:
             binary = saga_binary(self.config)
             if not binary or not Path(binary).is_file():
                 raise ServiceError('Saga is not installed. Set paths.saga_bin to its executable or Linux AppImage.')
-            if binary.lower().endswith('.exe'):
-                # Saga's single-instance relay drops host/port. Never send an
-                # attachment request to an already running instance.
-                try:
-                    result = subprocess.run(['/mnt/c/Windows/System32/tasklist.exe', '/FO', 'CSV', '/NH', '/FI', 'IMAGENAME eq Saga.exe'], capture_output=True, text=True, timeout=10, check=True)
-                except (OSError, subprocess.SubprocessError):
-                    raise ServiceError('Cannot check running Windows Saga instances.') from None
-                if '"saga.exe"' in result.stdout.lower():
-                    raise ServiceError('Close Saga first, then retry. Its running-instance relay cannot attach to a different Lich port.')
-            else:
-                for root in Path('/proc').iterdir():
-                    p = process_info(root.name) if root.name.isdigit() else None
-                    if p and any(Path(a).name.lower() in ('saga', Path(binary).name.lower()) for a in p['args'][:1]):
-                        raise ServiceError('Close Saga first, then retry this attachment.')
         elif client in ('vellum_gui', 'vellum_tui'):
             if not os.environ.get('DISPLAY') and not os.environ.get('WAYLAND_DISPLAY'):
                 raise ServiceError('No desktop display is available on the Gempy host. Use Connection details to run Vellum on your computer.')
@@ -298,11 +284,20 @@ class Service:
         if client == 'vellum_tui':
             command = terminal_command(self.config, command)
         try:
-            child = subprocess.Popen(command, env=saga_environment(p['port']) if client == 'saga' else None,
+            child = subprocess.Popen(command, env=saga_environment() if client == 'saga' else None,
                                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
             self._track(child)
         except OSError:
             raise ServiceError('Cannot start the selected client. Check its executable and the host desktop environment.') from None
+        if client == 'saga':
+            # A secondary Saga process forwards a new-window request and exits.
+            # Attachment happens later through that window's own host/port form.
+            status = child.poll()
+            if status is not None and status != 0:
+                raise ServiceError('Saga exited during startup. Check its installation.')
+            return {'session_id': p['id'], 'attachment_pending': True,
+                    'message': 'Saga launch requested. Finish attaching in its new window.',
+                    'connection': saga_connection_details(p['character'], p['realm'], p['port'])}
         deadline = time.monotonic() + 25
         while time.monotonic() < deadline:
             # Establishment must be a new backend socket, not the preexisting
@@ -311,7 +306,7 @@ class Service:
             inodes = socket_inodes(p['pid']) or set()
             connected = {r['inode'] for r in rows if r['local'] == p['port'] and r['state'] == '01' and r['inode'] in inodes}
             if connected - p['_connections']:
-                return {'session_id': p['id'], 'message': ('Saga' if client == 'saga' else 'Vellum') + ' connected on the Gempy host.'}
+                return {'session_id': p['id'], 'message': 'Vellum connected on the Gempy host.'}
             status = child.poll()
             if status is not None and status != 0:
                 raise ServiceError('The selected client exited during startup. Check its installation and desktop display.')

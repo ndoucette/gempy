@@ -151,23 +151,83 @@ administrator, not deployment directly on the public internet. Plain HTTP does
 not encrypt LAN traffic. Use Tailscale for access over untrusted networks.
 Run one daemon worker so operation locks and port allocation remain coordinated.
 
-An optional systemd user-service example is in
-[`examples/gempy.service`](examples/gempy.service). Edit its paths for your
-checkout, run password setup as the same user first, and install it yourself:
+Use [`examples/gempy.service`](examples/gempy.service) to run the dashboard as a
+systemd user service. Replace both checkout paths before installation. The unit
+runs `run.sh`, which selects the project Python environment and the local
+Ruby 4.0.3 runtime. Set the password only for a new installation; when migrating
+an existing dashboard, keep its configuration, credentials, and state directory.
 
 ```bash
 mkdir -p ~/.config/systemd/user
 cp examples/gempy.service ~/.config/systemd/user/gempy.service
 # Edit ~/.config/systemd/user/gempy.service before starting it.
 systemctl --user daemon-reload
-systemctl --user enable --now gempy.service
-journalctl --user -u gempy.service
+systemctl --user enable gempy.service
+loginctl enable-linger "$USER"
+# Stop only the old standalone dashboard PID before starting the service.
+systemctl --user start gempy.service
 ```
 
-To keep a user service running after logout, configure user lingering separately
-if needed (`loginctl enable-linger "$USER"`). No service is installed or enabled
-by Gempy. The example uses `KillMode=process` so stopping it leaves launched game
-and frontend processes alive. Keep that setting when adapting the unit.
+Lingering keeps the user manager running after logout and starts it when WSL
+boots. If enabling lingering requires administrator privileges, run
+`sudo loginctl enable-linger "$USER"`. WSL must have systemd enabled in
+`/etc/wsl.conf`. The service runs independently of the launching terminal while
+the WSL distribution is running.
+
+The unit uses `Restart=on-failure`, a five-second restart delay, and
+`KillMode=process`. Preserve `KillMode=process`: stopping or restarting the
+dashboard must leave Lich and Vellum processes running. Do not use a broad
+process-kill command when replacing a standalone dashboard. If it used
+`GEMPY_STATE_DIR` or `XDG_STATE_HOME`, configure the same state location in the
+unit before starting it.
+
+For the `/home/nick/gs4/gempy` WSL installation, the installed unit is
+`/home/nick/.config/systemd/user/gempy.service`, with the existing bind address
+`0.0.0.0:8080` and state at `/home/nick/.local/state/gempy`. Its environment
+includes `DISPLAY=:0`, the WSLg Wayland and PulseAudio sockets, and
+`WSL_INTEROP=/run/WSL/1_interop`, verified from a systemd user unit. This avoids
+depending on the original terminal's interop socket. Recheck these WSL-specific
+paths if moving the unit to another distribution.
+
+To reproduce this installation, use these values in the unit's `[Service]`
+section in addition to the settings in the example:
+
+```ini
+WorkingDirectory=/home/nick/gs4/gempy
+ExecStart=/home/nick/gs4/gempy/run.sh --web --host 0.0.0.0 --port 8080
+Environment=GEMPY_STATE_DIR=/home/nick/.local/state/gempy
+Environment=DISPLAY=:0
+Environment=WAYLAND_DISPLAY=/mnt/wslg/runtime-dir/wayland-0
+Environment=PULSE_SERVER=unix:/mnt/wslg/PulseServer
+Environment=WSL_INTEROP=/run/WSL/1_interop
+Environment=WSL_DISTRO_NAME=Ubuntu-26.04
+```
+
+Replace the example's `WorkingDirectory` and `ExecStart` lines with these
+values, then add the environment entries. After editing an installed unit, run
+`systemctl --user daemon-reload` before restarting it.
+
+Verified on 2026-10-18: the service was enabled and active, `Linger=yes`, and
+the dashboard returned HTTP 200 on port 8080. A dashboard-only service restart
+preserved all four running Lich processes, their listening sockets, and all
+22 Vellum processes, including clients launched by the service. Ruby 4.0.3,
+the SQLite/GTK/OpenSSL gems, Python dependencies, and Windows interoperability
+were checked in the service environment. The transition preserved configuration
+and credential file hashes and retained the existing telemetry database.
+
+Manage the installed service with:
+
+```bash
+systemctl --user status gempy.service
+journalctl --user -u gempy.service -f
+systemctl --user restart gempy.service
+systemctl --user stop gempy.service
+loginctl show-user nick -p Linger
+```
+
+An explicit stop stays stopped despite `Restart=on-failure`. Use
+`systemctl --user disable --now gempy.service` to stop it and disable automatic
+startup. Gempy itself does not install or enable a service.
 
 ## Other clients
 
@@ -186,13 +246,26 @@ exposing Lich's unauthenticated listener to the network. Replace `USER@SERVER`
 in the tunnel command with your SSH login. Vellum mobile apps can also pair
 with the existing web session; use Vellum's pairing workflow.
 
-**Saga (experimental)** starts an installed Saga against the matching Lich
-session. Set `paths.saga_bin` to its executable or Linux AppImage. On Windows/WSL,
-Gempy also discovers `C:\Program Files\Saga\Saga.exe`. Saga must be closed first:
-its single-instance relay does not preserve the connection's host and port.
-Gempy passes the detachable connection through environment variables, including
-WSL's Windows environment forwarding, and intentionally omits a proxy login key.
-It reports success only after a new socket appears on Lich's listener.
+**Saga (experimental)** opens a new window in the installed Saga, including when
+other Saga windows are already running. Set `paths.saga_bin` to its executable
+or Linux AppImage. On Windows/WSL, Gempy also discovers
+`C:\Program Files\Saga\Saga.exe`.
+
+Gempy displays the selected character, realm, host, and port. In the new Saga
+window, select **Via Lich**, expand **Advanced: attach to a running Lich**,
+choose **GemStone IV**, enter the displayed host and port, and select
+**Attach to Lich**. No account sign-in is needed: the port selects the existing
+character session, including its Prime or Test realm. Each Saga launch uses
+this step; existing windows stay open. The terminal launcher also displays
+these details and waits for Enter before returning to its roster.
+
+Saga 0.10.4 forwards new-window requests to a shared process but does not forward
+the external Lich host and port. Gempy uses Saga's per-window attach form to
+avoid connecting a new window to the first character's port. A launch is shown
+as awaiting manual attachment, rather than reported as connected.
+
+Gempy clears inherited automatic-login targets and passes the normal-window
+environment to Windows through `WSLENV`.
 Windows Saga must be able to reach WSL at `127.0.0.1`; the tested installation
 uses the existing WSL localhost networking. On older Lich versions accepting a
 single client, close the attached frontend before opening another one.
