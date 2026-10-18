@@ -1,0 +1,12 @@
+Original Saga experience-panel artwork, copied unchanged from the user's
+installed C:/Program Files/Saga/resources/app.asar at their request.
+
+out/renderer/assets/icon-lumnis-myL9YYMX.webp -> lumnis.webp
+out/renderer/assets/icon-lumnis-grayscale-BM1fayPD.webp -> lumnis-grayscale.webp
+out/renderer/assets/icon-fashtut-BLv9luM2.webp -> tutelage.webp
+out/renderer/assets/icon-fashtut-grayscale-V9Z6mGuJ.webp -> tutelage-grayscale.webp
+
+Saga's experience-panel rendering uses colored Tutelage for available,
+colored with a steady rgb(233, 196, 106) glow for active, and grayscale
+at 0.55 opacity for expended. Gempy labels available/waiting as Eligible.
+These assets remain the artwork of their original creators.

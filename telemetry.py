@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 import yaml
+from character_profiles import ProfileRepository, validate_profile
 
 DEFAULTS = dict(timezone='America/Los_Angeles', day_boundary=5, stale_seconds=20,
                 expiry_seconds=300, default_client='vellum_despana', density='comfortable',
@@ -48,6 +49,12 @@ class TelemetryStore:
         if 'received' not in {r[1] for r in self.db.execute('PRAGMA table_info(imports)')}:
             self.db.execute('ALTER TABLE imports ADD COLUMN received REAL NOT NULL DEFAULT 0')
         self.db.commit()
+        self.profiles = ProfileRepository(self.db)
+        self.db.commit()
+
+    def profile(self, realm, character):
+        with self.lock:
+            return self.profiles.get(realm, character)
 
     def settings(self):
         with self.lock:
@@ -68,7 +75,7 @@ class TelemetryStore:
                 raise ValueError(f'Invalid {k}')
         if cfg['expiry_seconds'] <= cfg['stale_seconds']:
             raise ValueError('Expiry must exceed stale interval')
-        if cfg['density'] not in ('comfortable','compact') or cfg['default_view'] not in ('live','progress','characters','settings'):
+        if cfg['density'] not in ('comfortable','compact') or cfg['default_view'] not in ('live','progress','characters','settings','rotation'):
             raise ValueError('Invalid display setting')
         from client_options import CLIENTS
         if not isinstance(cfg['default_client'],str) or cfg['default_client'] not in CLIENTS:
@@ -115,6 +122,7 @@ class TelemetryStore:
                 for item in (value.values() if isinstance(value,dict) else value): check(item,depth+1)
             elif isinstance(value,str) and len(value)>4096: raise ValueError('Snapshot string too long')
         check(data)
+        validate_profile(data)
         version=data.get('version',data.get('schema_version'))
         if type(version) is not int or version != 1: raise ValueError('Unsupported telemetry version')
         ident = data.get('identity',data)
@@ -162,6 +170,7 @@ class TelemetryStore:
                 if reporter in retired: raise ValueError('Retired reporter')
                 retired.add(previous['reporter'])
             self.db.execute('INSERT OR REPLACE INTO sequences VALUES (?,?,?)',(session_id,reporter,sequence))
+            self.profiles.ingest(realm, name, data, now)
             exp = data.get('experience') or {}
             if not isinstance(exp,dict): raise ValueError('Experience must be an object')
             normal = self._counter(exp, ('normal_xp','lifetime_exp','experience','total_experience','experience_total'))

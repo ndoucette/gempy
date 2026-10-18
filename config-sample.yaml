@@ -66,3 +66,11 @@ accounts:
 # Optional terminal emulator argv (no shell string):
 # clients:
 #   terminal_command: ['xterm', '-e']
+
+# Weekly Rotation: optional named mains and enchanting wizards.
+# Each entry has name, account, role (main or wizard), and an optional weekly_target.
+# Example entry: {name: Example, account: Main, role: wizard, weekly_target: 50000}
+# Account labels here should match accounts above. Profiles supply the live counters.
+weekly_rotation:
+  account_roles: {}  # account label -> main or utility
+  characters: []

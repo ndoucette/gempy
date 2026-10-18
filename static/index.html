@@ -62,6 +62,7 @@ main>section{padding-top:28px;animation:view-in .16s ease-out}
 .vitals{display:grid;grid-template-columns:1fr 1fr;column-gap:16px;row-gap:10px}.vital{display:grid;grid-template-columns:1fr auto;row-gap:5px;min-width:0;color:var(--muted);font-size:9px;text-transform:capitalize}.vital span:nth-child(2){font-variant-numeric:tabular-nums;font-size:10px;color:#c6ccce}
 .vital progress{grid-column:1/-1;width:100%;height:4px;border:0;appearance:none;border-radius:0;background:#32383b;accent-color:var(--resource,var(--green))}
 .vital progress::-webkit-progress-bar{background:#30363a;border-radius:0}.vital progress::-webkit-progress-value{background:var(--resource,var(--green));transition:width .2s}.vital progress::-moz-progress-bar{background:var(--resource,var(--green))}
+.mind-state,.level-progress{grid-column:1/-1;--resource:var(--gold)}
 .room{font-size:11px;margin:0;color:#d0d4d3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}.room-info{font-size:10px;color:#899399;margin:4px 0 8px}.status-line{font-size:10px;color:var(--muted);margin:0;line-height:1.6}.status-line span+span:before{content:' · ';color:#5b646a}
 .condition-note{font-size:9px;color:#ce9f85;margin:5px 0 0;line-height:1.5}.condition-note.critical{color:var(--red)}
 .pace-value{display:block;font-size:16px;font-weight:500;letter-spacing:-.3px;font-variant-numeric:tabular-nums}.pace-label{font-size:9px;color:var(--muted);margin-left:5px;font-weight:400;letter-spacing:0}.pace-today{font-size:10px;color:var(--muted);margin:5px 0 0}.pace-today strong{color:#c9d0cd;font-weight:500;font-variant-numeric:tabular-nums}.pace-eta,.pinned-metric{display:block;font-size:9px;color:#c7b48c;margin-top:5px}
@@ -103,6 +104,9 @@ dialog{padding:27px;border:1px solid #3d4449;background:#1a1e21;color:var(--text
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 
 </style>
+<link rel="stylesheet" href="/assets/profiles.css">
+<link rel="stylesheet" href="/assets/rotation.css">
+<link rel="stylesheet" href="/assets/workspace.css">
 </head>
 <body>
 <svg aria-hidden="true" width="0" height="0" style="position:absolute"><defs>
@@ -127,12 +131,13 @@ dialog{padding:27px;border:1px solid #3d4449;background:#1a1e21;color:var(--text
  <aside class="sidebar"><div class="brand"><svg class="brand-mark" aria-hidden="true"><use href="#gem"/></svg><div><div class="brand-name">GEMPY</div><div class="brand-sub">CHARACTER MONITOR</div></div></div>
  <nav aria-label="Main navigation"><div class="nav-label">Workspace</div>
  <button id="sessionsTab" class="nav-button" aria-current="page"><svg aria-hidden="true"><use href="#sessions-icon"/></svg>Live<span id="sessionNavCount" class="nav-count">0</span></button>
+ <button id="rotationTab" class="nav-button"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18m-12 5 2 2 4-4"/></svg>Rotation<span id="rotationNavCount" class="nav-count"></span></button>
  <button id="progressTab" class="nav-button"><svg aria-hidden="true"><use href="#trend-icon"/></svg>Progress</button>
  <button id="charactersTab" class="nav-button"><svg aria-hidden="true"><use href="#characters-icon"/></svg>Characters<span id="characterNavCount" class="nav-count">0</span></button>
  <button id="settingsTab" class="nav-button"><svg aria-hidden="true"><use href="#settings-icon"/></svg>Settings</button></nav>
  <div class="sidebar-footer"><div class="server-label"><span class="dot"></span>Gempy connected</div><button id="logout" class="logout" aria-label="Log out"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><use href="#logout-icon"/></svg>Log out</button></div></aside>
  <main><header class="topbar"><div class="breadcrumb">Elanthia<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden="true"><path d="m4 2 3 3-3 3"/></svg><span id="breadcrumb">Overview</span></div><div id="clientToolbar" class="toolbar"><label class="field">Client<select id="clientChoice"><option value="vellum_despana">Vellum Despana</option><option value="vellum_web">Vellum Web / mobile</option><option value="vellum_gui">Vellum desktop — Gempy host</option><option value="vellum_tui">Vellum terminal — Gempy host</option><option value="connection">Connection details — another computer</option><option value="saga">Saga — Gempy host (experimental)</option></select></label><p id="clientHint" class="roster-count">Opens in your browser. This choice also applies to session attachments.</p></div><div class="admin">admin<span class="admin-avatar" aria-hidden="true">A</span></div></header>
- <section id="sessions" aria-labelledby="sessionsHeading"><div class="page-heading"><div><h2 id="sessionsHeading">Live characters</h2><p>Monitor your characters, wherever they’re connected.</p></div><button id="refreshButton" class="secondary" type="button">Refresh</button></div><div class="stats"><div class="stat"><div class="eyebrow">Running</div><div id="runningCount" class="stat-value green">0</div></div><div class="stat"><div class="eyebrow">Attached</div><div id="attachedCount" class="stat-value">0</div></div><div class="stat"><div class="eyebrow">Headless</div><div id="headlessCount" class="stat-value">0</div></div></div><div class="toolbar live-filters"><input id="liveSearch" type="search" placeholder="Search characters…" aria-label="Filter live characters"><select id="liveRealm" aria-label="Filter realm"><option value="">All realms</option><option value="prime">Prime</option><option value="test">Test</option></select><select id="liveAccount" aria-label="Live account"><option value="">All accounts</option></select><select id="liveSort" aria-label="Sort live characters"><option value="attention">Needs attention</option><option value="name">Character name</option></select><button id="layoutToggle" class="secondary">Table view</button><button id="showDismissed" class="secondary" hidden>Show dismissed</button></div><div id="sessionList" class="session-panel"></div><div class="session-footer"><span><span class="dot"></span> <span id="pollLabel">Updates every 3 seconds</span><span id="lastUpdated"></span></span><span>Closing a client tab leaves your game running.</span></div></section>
+ <section id="sessions" aria-label="Live characters"><div id="sessionList" class="session-panel"></div><div class="session-footer"><span><span class="dot"></span> <span id="pollLabel">Updates every 3 seconds</span><span id="lastUpdated"></span></span><span>Closing a client tab leaves your game running.</span></div></section>
  <section id="characters" aria-labelledby="charactersHeading"><div class="page-heading"><div><h2 id="charactersHeading">Character roster</h2><p>Launch a character or manage your roster.</p></div><div class="realm-control"><span class="realm-label" id="realmLabel">SELECT REALM</span><div class="segmented" role="group" aria-labelledby="realmLabel"><button type="button" data-realm="prime" aria-pressed="true">Prime</button><button type="button" data-realm="test" aria-pressed="false">Test</button></div></div></div><div id="testBanner" class="test-banner" hidden>Test realm selected. Launches will connect to the test server.</div><div class="toolbar"><label class="search"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><use href="#search-icon"/></svg><input id="search" type="search" aria-label="Find a character" placeholder="Find a character…"></label><div class="roster-tools"><select id="accountFilter" aria-label="Filter by account"><option value="">All accounts</option></select><span id="rosterCount" class="roster-count"></span><button id="openAddCharacter" class="secondary" type="button" aria-haspopup="dialog">+ Add character</button></div></div><div id="accounts" class="account-grid"></div>
 <div class="bottom-note"><svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><use href="#lock"/></svg>Game sessions stay connected when you close this browser.</div></section>
 
@@ -144,7 +149,7 @@ dialog{padding:27px;border:1px solid #3d4449;background:#1a1e21;color:var(--text
 <div id="message" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 <dialog id="confirmDialog" aria-labelledby="confirmTitle" aria-describedby="confirmDescription"><div class="dialog-icon"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><use href="#power"/></svg></div><h2 id="confirmTitle"></h2><p id="confirmDescription"></p><div class="dialog-actions"><button id="confirmCancel" class="secondary" type="button" autofocus>Keep playing</button><button id="confirmAction" class="danger" type="button">Disconnect</button></div></dialog>
 <dialog id="connectionDialog" class="add-character" aria-labelledby="connectionHeading"><h2 id="connectionHeading">Connect another client</h2><p id="connectionNote"></p><div id="connectionCommands"></div><div class="dialog-actions"><button id="connectionClose" class="secondary" type="button">Close</button></div></dialog>
-<dialog id="characterDetails" aria-labelledby="detailTitle"><div class="page-heading"><div><h2 id="detailTitle"></h2><p id="detailSubtitle" class="detail-subtitle"></p></div><button id="detailClose" class="secondary" aria-label="Close character details">×</button></div><div class="segmented" id="detailTabs"><button data-detail="status" aria-pressed="true">Status</button><button data-detail="experience">Experience</button><button data-detail="bonuses">Bonuses</button><button data-detail="history">History</button></div><div id="detailContent"></div></dialog>
+<dialog id="characterDetails" aria-labelledby="detailTitle"><div class="page-heading"><div><h2 id="detailTitle"></h2><p id="detailSubtitle" class="detail-subtitle"></p></div><button id="detailClose" class="secondary" aria-label="Close character details">×</button></div><div class="segmented" id="detailTabs"><button data-detail="overview" aria-pressed="true">Overview</button><button data-detail="stats">Stats</button><button data-detail="skills">Skills</button><button data-detail="history">History</button></div><div id="detailContent"></div></dialog>
 <script>
 'use strict';
 let csrf='', active=false, realm='prime', accounts={}, sessions=[], sessionFingerprint='';
@@ -178,13 +183,14 @@ async function operation(path,body,openClient=false,key=path){if(busy.has(key))r
 async function start(){const data=await api('characters');updateAccounts(data.accounts);active=true;$('loginLayout').hidden=true;$('app').hidden=false;$('characterNavCount').textContent=Object.values(accounts).reduce((n,chars)=>n+chars.length,0);sessions=[];sessionFingerprint='';renderCharacters();renderSessions();await refresh();}
 $('login').onsubmit=async event=>{event.preventDefault();$('loginButton').disabled=true;try{const form=new FormData(event.target);csrf=(await api('login','POST',Object.fromEntries(form))).csrf;event.target.elements.password.value='';message('');await start()}catch(error){message(error.message,'error')}finally{$('loginButton').disabled=false}};
 $('logout').onclick=async()=>{try{await api('logout','POST');csrf='';showLogin();message('You’re signed out. Your game sessions are still running.','success')}catch(error){message(error.message,'error')}};
-$('charactersTab').onclick=()=>setTab('characters');$('sessionsTab').onclick=()=>setTab('sessions');$('refreshButton').onclick=refresh;$('search').oninput=renderCharacters;$('accountFilter').onchange=renderCharacters;
+$('charactersTab').onclick=()=>setTab('characters');$('sessionsTab').onclick=()=>setTab('sessions');$('search').oninput=renderCharacters;$('accountFilter').onchange=renderCharacters;
 for(const button of document.querySelectorAll('[data-realm]'))button.onclick=()=>{realm=button.dataset.realm;for(const other of document.querySelectorAll('[data-realm]'))other.setAttribute('aria-pressed',String(other===button));$('testBanner').hidden=realm!=='test';renderCharacters();};
 // Dashboard views share the existing session/client controls.
 let currentView='sessions', detailSession=null, detailSection='status', detailHistoryPeriod='month', progressData=null;
+let detailHistoryStart='', detailHistoryEnd='', comparisonIdentity='', comparisonBasis='normal';
 let progressSort='total_xp',progressSortDirection=-1;
-let dashboardSettings={}, tableMode=localStorage.getItem('gempy.layout')==='table';
-const dismissed=new Set(), pins=JSON.parse(localStorage.getItem('gempy.pins')||'{}');
+let dashboardSettings={};
+const pins=JSON.parse(localStorage.getItem('gempy.pins')||'{}');
 const number=v=>typeof v==='number'?v.toLocaleString():v===null||v===undefined?'—':String(v);
 function humanDuration(value){if(value===null||value===undefined)return '—';const seconds=Math.max(0,Math.round(Number(value)||0));return [Math.floor(seconds/86400)?Math.floor(seconds/86400)+'d':'',Math.floor(seconds%86400/3600)?Math.floor(seconds%86400/3600)+'h':'',Math.floor(seconds%3600/60)?Math.floor(seconds%3600/60)+'m':'',seconds<60?seconds+'s':''].filter(Boolean).join(' ')||'0s'}
 function accountFor(name){return Object.entries(accounts).find(([,names])=>names.some(n=>n.toLowerCase()===name.toLowerCase()))?.[0]||''}
@@ -235,7 +241,7 @@ function sessionActions(session) {
   open.setAttribute('aria-label','Open client for '+session.character+' on '+session.realm);
   open.disabled=busy.has(key);
   const secondary=text('div','','row-secondary');
-  const inspect=actionButton('Details',()=>showDetails(session),'inspect-button',null);
+  const inspect=actionButton('Profile',()=>showDetails(session),'inspect-button',null);
   inspect.setAttribute('aria-label','Details for '+session.character+' on '+session.realm);
   const disconnect=actionButton('',()=>confirmDisconnect(session),'icon-button','power');
   disconnect.setAttribute('aria-label','Disconnect '+session.character+' on '+session.realm);
@@ -245,29 +251,14 @@ function sessionActions(session) {
     const force=actionButton('Force disconnect',()=>confirmDisconnect(session,true),'force-button',null);
     force.disabled=busy.has(key);actions.append(force);
   }
-  if(freshness(session)!=='fresh') actions.append(actionButton('Hide from view',()=>{
-    dismissed.add(session.id);renderSessions();
-  },'dismiss-button',null));
   return actions;
 }
 
 function renderSessions() {
-  const list=$('sessionList');list.replaceChildren();list.className=tableMode?'live-table':'live-grid';
-  $('runningCount').textContent=sessions.filter(s=>s.running).length;
-  $('attachedCount').textContent=sessions.filter(s=>s.attachment==='Attached').length;
-  $('headlessCount').textContent=sessions.filter(s=>s.attachment==='Headless').length;
+  const list=$('sessionList');list.replaceChildren();list.className='live-grid';
   $('sessionNavCount').textContent=sessions.length;
-  const query=$('liveSearch').value.toLowerCase();
-  const selected=sessions.filter(s=>!dismissed.has(s.id)&&(!$('liveRealm').value||s.realm===$('liveRealm').value)
-    &&(!$('liveAccount').value||accountFor(s.character)===$('liveAccount').value)
-    &&(s.character+' '+accountFor(s.character)).toLowerCase().includes(query));
-  selected.sort((a,b)=>$('liveSort').value==='attention'?attentionScore(b)-attentionScore(a)
-    ||a.character.localeCompare(b.character):a.character.localeCompare(b.character));
-  $('showDismissed').hidden=!dismissed.size;
-  $('layoutToggle').textContent=tableMode?'Comfortable':'Compact';
-  $('layoutToggle').setAttribute('aria-pressed',String(tableMode));
-  if(!selected.length) list.append(emptyState('No characters to monitor',sessions.length
-    ? 'Adjust your filters or show hidden characters.' : 'Launch a character from your roster to begin.','sessions-icon'));
+  const selected=[...sessions].sort((a,b)=>attentionScore(b)-attentionScore(a)||a.character.localeCompare(b.character));
+  if(!selected.length) list.append(emptyState('No characters to monitor','Launch a character from your roster to begin.','sessions-icon'));
   else {
     const heading=text('div','','monitor-heading');heading.setAttribute('aria-hidden','true');
     for(const [label,cls] of [['Character',''],['Vitals',''],['Location & status','heading-location'],['Experience',''],['Client','']])
@@ -289,11 +280,51 @@ function renderSessions() {
       identity.append(head,text('p',subtitle,'live-sub'),status);
       const vitals=text('div','','vitals row-vitals');
       for(const resource of ['health','mana','stamina','spirit']) vitals.append(vitalBar(resource,data.vitals?.[resource]));
+      const mind=data.status?.mindstate;
+      const mindValue=typeof mind?.value==='number'&&Number.isFinite(mind.value)
+        ? Math.min(100,Math.max(0,mind.value)) : null;
+      const mindText=summaryValue(mind);
+      const mindBar=vitalBar('mind state',{current:mindValue,max:100});
+      mindBar.classList.add('mind-state');
+      mindBar.style.setProperty('--resource','var(--gold)');
+      mindBar.children[1].textContent=mindText==='—'||!mindText
+        ? mindValue===null?'Unavailable':number(mindValue)+'%' : mindText;
+      const mindProgress=mindBar.querySelector('progress');
+      mindProgress.setAttribute('aria-valuetext',mindBar.children[1].textContent
+        +(mindValue===null?' (value unavailable)':' · '+number(mindValue)+'%'));
+      vitals.append(mindBar);
+      const level=data.character?.level;
+      if(typeof level==='number'&&Number.isFinite(level)&&level>=0&&level<=100) {
+        const xp=data.experience||{},capped=level===100;
+        const known=value=>typeof value==='number'&&Number.isFinite(value)&&value>=0;
+        // ATPs are earned every 50,000 ascension XP. Prefer the live counter
+        // over the periodically collected experience-command remainder.
+        const ascension=xp.ascension_exp??xp.ascension_experience;
+        const remaining=capped
+          ? known(ascension)?50000-ascension%50000
+            : known(xp.exp_to_next_atp)&&xp.exp_to_next_atp<=50000?xp.exp_to_next_atp:null
+          : known(xp.experience_to_next_level)?xp.experience_to_next_level:null;
+        const reported=capped ? remaining===null?null:(50000-remaining)/500 : xp.next_level_percent;
+        const percent=known(reported)?Math.min(100,reported):null;
+        const progress=vitalBar(capped?'To next ATP':'To level '+(level+1),{current:percent,max:100});
+        progress.classList.add('character-progress',capped?'atp-progress':'level-progress');
+        progress.style.setProperty('--resource','forestgreen');
+        progress.children[1].textContent=percent===null?'Not reported':number(Math.round(percent*10)/10)+'%';
+        const detail=capped
+          ? remaining===null?'XP to next ATP not reported':number(remaining)+' XP to next ATP'
+          : remaining!==null&&known(xp.last_hour_gain)&&xp.last_hour_gain>0
+            ? 'Est. '+humanDuration(remaining/xp.last_hour_gain*3600)+' to level' : 'ETA unavailable';
+        const note=text('p',detail,'progress-note');
+        if(!capped)note.title='Estimate from EXP gained over the past 60 minutes. During the first hour of reporting, uses EXP recorded so far.';
+        progress.append(note);
+        progress.querySelector('progress').setAttribute('aria-valuetext',progress.children[1].textContent+' · '+detail);
+        identity.append(progress);
+      }
       const location=text('div','','row-location');
       const room=text('p',data.location?.room_title||'Location unavailable','room');room.title=room.textContent;
       location.append(room,text('p',data.location?.room_id!=null?'Room '+data.location.room_id:'Room —','room-info'));
       const statusLine=text('p','','status-line');
-      statusLine.append(text('span',summaryValue(data.status?.mindstate)),text('span',summaryValue(data.status?.stance)));
+      statusLine.append(text('span',summaryValue(data.status?.stance)));
       location.append(statusLine);
       const wounds=Object.values(data.injuries?.wounds||{}).filter(v=>Number(v)>0).length;
       const scars=Object.values(data.injuries?.scars||{}).filter(v=>Number(v)>0).length;
@@ -315,7 +346,8 @@ function renderSessions() {
     }
   }
   if(detailSession&&$('characterDetails').open) {
-    detailSession=sessions.find(s=>s.id===detailSession.id)||detailSession;
+    detailSession=sessions.find(s=>s.realm===detailSession.realm&&s.character.toLowerCase()===detailSession.character.toLowerCase())
+      ||{...detailSession,running:false,attachment:'Offline',telemetry:{status:'unavailable'}};
     if(!$('detailContent').contains(document.activeElement)) renderDetail();
   }
 }
@@ -367,22 +399,32 @@ function effectList(effects,parent) {
   else if(!count)section.append(text('p','No active effects reported.','detail-note'));
 }
 
-async function renderDetail() {
-  const request=++detailRequest,content=$('detailContent');content.replaceChildren();
-  for(const button of document.querySelectorAll('[data-detail]')) button.setAttribute('aria-pressed',String(button.dataset.detail===detailSection));
+async function renderDetail(target=null,requestedSection=detailSection) {
+  const request=++detailRequest,content=target||$('detailContent');content.replaceChildren();
+  if(!target)for(const button of document.querySelectorAll('[data-detail]')) button.setAttribute('aria-pressed',String(button.dataset.detail===detailSection));
   const data=telemetryData(detailSession),xp=data.experience||{};
-  if(detailSection==='history') {
+  if(requestedSection==='history') {
     const identity=detailSession.character.toLowerCase()+':'+detailSession.realm;
     const period=document.createElement('select');period.setAttribute('aria-label','Character history period');
-    for(const [value,label] of [['day','Today'],['week','This week'],['month','This month'],['year','This year']]) {
+    for(const [value,label] of [['day','Today'],['week','This week'],['month','This month'],['year','This year'],['custom','Custom range']]) {
       const option=text('option',label);option.value=value;period.append(option);
     }
-    period.value=detailHistoryPeriod;period.onchange=()=>{detailHistoryPeriod=period.value;renderDetail();};
-    content.append(period,text('p','Loading history…','detail-note'));
+    period.value=detailHistoryPeriod;period.onchange=()=>{detailHistoryPeriod=period.value;renderDetail();document.dispatchEvent(new Event('gempy:scope'));};
+    content.append(period);
+    if(detailHistoryPeriod==='custom') {
+      for(const [label,value,set] of [['History range start',detailHistoryStart,v=>detailHistoryStart=v],['History range end',detailHistoryEnd,v=>detailHistoryEnd=v]]) {
+        const field=text('label',label,'history-date'),input=document.createElement('input');input.type='date';input.value=value;
+        input.onchange=()=>{set(input.value);renderDetail();document.dispatchEvent(new Event('gempy:scope'));};field.append(input);content.append(field);
+      }
+      if(!detailHistoryStart||!detailHistoryEnd||detailHistoryStart>detailHistoryEnd){content.append(text('p','Choose a valid start and end date.','detail-note'));return;}
+    }
+    const controls=[...content.children];
+    content.append(text('p','Loading history…','detail-note'));
     try {
-      const result=await api('progress?period='+detailHistoryPeriod);
+      const result=await api('progress?'+historyQuery());
       if(request!==detailRequest||detailSection!=='history'||identity!==detailSession.character.toLowerCase()+':'+detailSession.realm)return;
-      content.replaceChildren(period);
+      content.replaceChildren(...controls);
+      content.append(text('p',historyScope(result),'history-scope'));
       const row=result.characters.find(c=>c.character.toLowerCase()===detailSession.character.toLowerCase()&&c.realm===detailSession.realm);
       if(row) {
         const section=inspectorSection('Experience gained',content);section.style.marginTop='20px';
@@ -394,7 +436,7 @@ async function renderDetail() {
     } catch(error) {if(request===detailRequest)content.replaceChildren(text('p',error.message,'detail-note'));}
     return;
   }
-  if(detailSection==='status') {
+  if(requestedSection==='status') {
     const location=inspectorSection('Location',content);
     location.append(text('p',data.location?.room_title||'Location unavailable','inspector-room'),
       text('p',data.location?.room_id!=null?'Room '+data.location.room_id:'Room —','detail-note'));
@@ -414,7 +456,7 @@ async function renderDetail() {
     }
     effectList(data.effects,content);return;
   }
-  if(detailSection==='experience') {
+  if(requestedSection==='experience') {
     const totals=inspectorSection('Experience',content);
     const level=text('div','','inspector-level');level.append(text('strong','Level '+number(data.character?.level)),text('small',xp.next_level_percent==null?'':number(xp.next_level_percent)+'% to next level'));
     const track=text('div','','level-track'),fill=text('span');fill.style.width=Math.max(0,Math.min(100,Number(xp.next_level_percent)||0))+'%';track.append(fill);totals.append(level,track);
@@ -467,19 +509,41 @@ function renderChart(rows,parent) {
 }
 
 function renderInjuries(injuries,parent){if(!injuries)return;const box=text('div','','injury-overview'),svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 160 260');svg.setAttribute('role','img');svg.setAttribute('aria-label','Wound and scar locations; numbered markers show severity');const outline=document.createElementNS(svg.namespaceURI,'path');outline.setAttribute('d','M80 12a18 18 0 1 0 0 36a18 18 0 1 0 0-36M60 58L44 66L20 126L32 132L54 90L54 148L51 234L67 234L80 164L93 234L109 234L106 148L106 90L128 132L140 126L116 66L100 58Z');outline.setAttribute('fill','#242c2e');outline.setAttribute('stroke','#69767a');svg.append(outline);const positions={head:[80,25],neck:[80,53],chest:[80,82],abdomen:[80,116],back:[102,101],leftArm:[111,87],rightArm:[49,87],leftHand:[130,128],rightHand:[29,128],leftLeg:[98,186],rightLeg:[62,186],leftFoot:[101,234],rightFoot:[59,234],leftEye:[88,31],rightEye:[72,31],nsys:[144,35]};for(const area of new Set([...Object.keys(injuries.wounds||{}),...Object.keys(injuries.scars||{})])){const severity=Math.max(Number(injuries.wounds?.[area])||0,Number(injuries.scars?.[area])||0);if(!severity)continue;const [x,y]=positions[area]||[144,70];const circle=document.createElementNS(svg.namespaceURI,'circle');circle.setAttribute('cx',x);circle.setAttribute('cy',y);circle.setAttribute('r',9);circle.setAttribute('fill',['','#c5a066','#db8b55','#f09c9c'][severity]||'#f09c9c');const title=document.createElementNS(svg.namespaceURI,'title');title.textContent=area+' · wound '+number(injuries.wounds?.[area])+' · scar '+number(injuries.scars?.[area]);circle.append(title);svg.append(circle);const value=document.createElementNS(svg.namespaceURI,'text');value.setAttribute('x',x);value.setAttribute('y',y+4);value.setAttribute('text-anchor','middle');value.setAttribute('font-size','11');value.setAttribute('fill','#10131b');value.textContent=severity;svg.append(value)}box.append(svg);const list=text('div','','injury-map');for(const area of new Set([...Object.keys(injuries.wounds||{}),...Object.keys(injuries.scars||{})])){const wound=injuries.wounds?.[area],scar=injuries.scars?.[area];if(!(Number(wound)>0||Number(scar)>0))continue;const cell=text('div',area==='nsys'?'Nervous system':area.replace(/([a-z])([A-Z])/g,'$1 $2'),'injury-area');cell.dataset.severity=String(Math.max(Number(wound)||0,Number(scar)||0));cell.append(text('small','Wound '+number(wound)+' · Scar '+number(scar)));list.append(cell)}box.append(list);parent.append(box)}
-async function loadProgress(){try{const custom=$('progressPeriod').value==='custom';$('progressStartLabel').hidden=!custom;$('progressEndLabel').hidden=!custom;if(custom&&(!$('progressStart').value||!$('progressEnd').value)){return}if(custom&&$('progressStart').value>$('progressEnd').value){message('Range start must precede the end.','error');return}progressData=await api('progress?period='+encodeURIComponent($('progressPeriod').value)+(custom?'&start='+$('progressStart').value+'&end='+$('progressEnd').value:''));renderProgress()}catch(e){$('progressContent').replaceChildren(emptyState('History unavailable',e.message))}}
-function renderProgress(){if(!progressData)return;const out=$('progressContent');out.replaceChildren();const q=$('progressSearch').value.toLowerCase(),rows=(progressData.characters||[]).filter(r=>(!$('progressRealm').value||r.realm===$('progressRealm').value)&&(!$('progressAccount').value||accountFor(r.character)===$('progressAccount').value)&&(r.character+' '+accountFor(r.character)).toLowerCase().includes(q)).sort((a,b)=>progressSortDirection*(typeof a[progressSort]==='number'?a[progressSort]-b[progressSort]:String(a[progressSort]||'').localeCompare(String(b[progressSort]||''))));const totals=rows.reduce((a,r)=>[a[0]+r.normal_xp,a[1]+r.ascension_xp,a[2]+r.total_xp],[0,0,0]);const stats=text('div','','stats');['Normal XP','Ascension XP','Combined XP'].forEach((label,i)=>{const box=text('div','','stat');box.append(text('div',label,'eyebrow'),text('div',number(totals[i]),'stat-value'));stats.append(box)});out.append(stats,text('p',progressData.period_key||'','roster-count'));const table=document.createElement('table');table.className='progress-table';const head=document.createElement('thead'),hr=document.createElement('tr');for(const [key,label] of [['character','Character'],['realm','Realm'],['normal_xp','Normal XP'],['ascension_xp','Ascension XP'],['total_xp','Combined XP'],['atp_equivalent','ATP equivalent'],['coverage','Coverage']]){const cell=text('th');cell.setAttribute('aria-sort',progressSort===key?(progressSortDirection===1?'ascending':'descending'):'none');const button=actionButton(label+(progressSort===key?(progressSortDirection===1?' ↑':' ↓'):''),()=>{progressSortDirection=progressSort===key?-progressSortDirection:(['character','realm','coverage'].includes(key)?1:-1);progressSort=key;renderProgress()},'sort-header',null);cell.append(button);hr.append(cell)}head.append(hr);table.append(head);const body=document.createElement('tbody');for(const r of rows){const tr=document.createElement('tr'),nameCell=text('td');nameCell.append(actionButton(r.character,()=>{const session=sessions.find(s=>s.character.toLowerCase()===r.character.toLowerCase()&&s.realm===r.realm)||{id:'history:'+r.realm+':'+r.character,character:r.character,realm:r.realm,running:false,attachment:'Offline',telemetry:{status:'unavailable'}};showDetails(session,'history')},'progress-character',null));tr.append(nameCell);for(const v of [r.realm,r.normal_xp,r.ascension_xp,r.total_xp,r.atp_equivalent,r.coverage])tr.append(text('td',number(v)));body.append(tr)}table.append(body);const wrap=text('div','','table-scroll');wrap.append(table);out.append(wrap);if(!rows.length)out.append(emptyState('No progress recorded','Telemetry and Saga history imports will populate this view.'));const daily=new Map();for(const r of rows)for(const day of r.daily||[]){const item=daily.get(day.date)||{date:day.date,total_xp:0};item.total_xp+=day.total_xp||0;daily.set(day.date,item)}renderChart([...daily.values()].sort((a,b)=>a.date.localeCompare(b.date)),out);out.append(text('p','Coverage: observed = sampled counters; imported = source period totals; gap = gain spans missing telemetry and is assigned to the receipt day; its exact timing is unknown. Charts include only available daily detail and may not represent the complete imported period total. ATP equivalent is ascension XP converted to ATP units.','coverage-note'))}
+function historyQuery() {
+  const query=new URLSearchParams({period:detailHistoryPeriod});
+  if(detailHistoryPeriod==='custom'){query.set('start',detailHistoryStart);query.set('end',detailHistoryEnd);}
+  return query.toString();
+}
+function historyScope(result) {
+  return (detailHistoryPeriod==='custom'?detailHistoryStart+' through '+detailHistoryEnd:result.period_key||detailHistoryPeriod)
+    +' · '+(dashboardSettings.timezone||'America/Los_Angeles')+' · Day begins at '+(dashboardSettings.day_boundary??5)+':00';
+}
+let progressRequest=0;
+async function loadProgress(){
+  const request=++progressRequest,period=$('progressPeriod').value,custom=period==='custom';
+  $('progressStartLabel').hidden=!custom;$('progressEndLabel').hidden=!custom;
+  const start=$('progressStart').value,end=$('progressEnd').value;
+  if(custom&&(!start||!end))return;
+  if(custom&&start>end){message('Range start must precede the end.','error');return;}
+  try {
+    const data=await api('progress?period='+encodeURIComponent(period)+(custom?'&start='+start+'&end='+end:''));
+    if(request!==progressRequest||!active||period!==$('progressPeriod').value||
+      (custom&&(start!==$('progressStart').value||end!==$('progressEnd').value)))return;
+    progressData=data;renderProgress();
+  }catch(error){if(request===progressRequest&&active)$('progressContent').replaceChildren(emptyState('History unavailable',error.message));}
+}
+function renderProgress(){if(!progressData)return;const out=$('progressContent');out.replaceChildren();const q=$('progressSearch').value.toLowerCase(),rows=(progressData.characters||[]).filter(r=>(!$('progressRealm').value||r.realm===$('progressRealm').value)&&(!$('progressAccount').value||accountFor(r.character)===$('progressAccount').value)&&(r.character+' '+accountFor(r.character)).toLowerCase().includes(q)).sort((a,b)=>progressSortDirection*(typeof a[progressSort]==='number'?a[progressSort]-b[progressSort]:String(a[progressSort]||'').localeCompare(String(b[progressSort]||''))));const totals=rows.reduce((a,r)=>[a[0]+r.normal_xp,a[1]+r.ascension_xp,a[2]+r.total_xp],[0,0,0]);const stats=text('div','','stats');['Normal XP','Ascension XP','Combined XP'].forEach((label,i)=>{const box=text('div','','stat');box.append(text('div',label,'eyebrow'),text('div',number(totals[i]),'stat-value'));stats.append(box)});out.append(stats,text('p',progressData.period_key||'','roster-count'));const table=document.createElement('table');table.className='progress-table';const head=document.createElement('thead'),hr=document.createElement('tr');for(const [key,label] of [['character','Character'],['realm','Realm'],['normal_xp','Normal XP'],['ascension_xp','Ascension XP'],['total_xp','Combined XP'],['atp_equivalent','ATP equivalent'],['coverage','Coverage']]){const cell=text('th');cell.setAttribute('aria-sort',progressSort===key?(progressSortDirection===1?'ascending':'descending'):'none');const button=actionButton(label+(progressSort===key?(progressSortDirection===1?' ↑':' ↓'):''),()=>{progressSortDirection=progressSort===key?-progressSortDirection:(['character','realm','coverage'].includes(key)?1:-1);progressSort=key;renderProgress()},'sort-header',null);cell.append(button);hr.append(cell)}head.append(hr);table.append(head);const body=document.createElement('tbody');for(const r of rows){const tr=document.createElement('tr'),nameCell=text('td');nameCell.append(actionButton(r.character,()=>{const session=sessions.find(s=>s.character.toLowerCase()===r.character.toLowerCase()&&s.realm===r.realm)||{id:'history:'+r.realm+':'+r.character,character:r.character,realm:r.realm,running:false,attachment:'Offline',telemetry:{status:'unavailable'}};detailHistoryPeriod=$('progressPeriod').value;detailHistoryStart=$('progressStart').value;detailHistoryEnd=$('progressEnd').value;showDetails(session,'history')},'progress-character',null));tr.append(nameCell);for(const v of [r.realm,r.normal_xp,r.ascension_xp,r.total_xp,r.atp_equivalent,r.coverage])tr.append(text('td',number(v)));body.append(tr)}table.append(body);const wrap=text('div','','table-scroll');wrap.append(table);out.append(wrap);if(!rows.length)out.append(emptyState('No progress recorded','Telemetry and Saga history imports will populate this view.'));const daily=new Map();for(const r of rows)for(const day of r.daily||[]){const item=daily.get(day.date)||{date:day.date,total_xp:0};item.total_xp+=day.total_xp||0;daily.set(day.date,item)}renderChart([...daily.values()].sort((a,b)=>a.date.localeCompare(b.date)),out);out.append(text('p','Coverage: observed = sampled counters; imported = source period totals; gap = gain spans missing telemetry and is assigned to the receipt day; its exact timing is unknown. Charts include only available daily detail and may not represent the complete imported period total. ATP equivalent is ascension XP converted to ATP units.','coverage-note'))}
 async function loadSettings(){try{const result=await api('settings');dashboardSettings=result.settings||result;const form=$('settingsForm');for(const [key,value] of Object.entries(dashboardSettings))if(form.elements[key])form.elements[key].value=value;form.elements.rollover_hour.value=dashboardSettings.day_boundary??5}catch(e){message(e.message,'error')}}
 $('settingsForm').elements.default_client.replaceChildren(...Array.from($('clientChoice').options).map(o=>o.cloneNode(true)));
 $('settingsForm').onsubmit=async e=>{e.preventDefault();const values=Object.fromEntries(new FormData(e.target));values.day_boundary=Number(values.rollover_hour);delete values.rollover_hour;values.stale_seconds=Number(values.stale_seconds);values.update_interval=Number(values.update_interval);values.expiry_seconds=Number(values.expiry_seconds);if(values.default_view==='sessions')values.default_view='live';try{const result=await api('settings','POST',values);dashboardSettings=result.settings||result;configurePolling(values.update_interval);document.body.dataset.density=values.density;$('clientChoice').value=values.default_client;$('clientChoice').onchange();message('Settings saved.','success')}catch(error){message(error.message,'error')}};
 async function rotateToken(){try{const data=await api('telemetry/token','POST',{});dashboardSettings.reporter_configured=true;$('tokenOutput').textContent='Reporter token (copy now): '+data.token}catch(e){message(e.message,'error')}}
 const tokenDialog=document.createElement('dialog');tokenDialog.setAttribute('aria-labelledby','tokenConfirmTitle');const tokenTitle=text('h2','Rotate reporter token?');tokenTitle.id='tokenConfirmTitle';const tokenActions=text('div','','dialog-actions');tokenActions.append(actionButton('Cancel',()=>tokenDialog.close(),'secondary',null),actionButton('Rotate token',()=>{tokenDialog.close();rotateToken()},'danger',null));tokenDialog.append(tokenTitle,text('p','Existing reporters will stop authenticating until you update each one with the new token.'),tokenActions);document.body.append(tokenDialog);$('reporterToken').onclick=()=>dashboardSettings.reporter_configured?tokenDialog.showModal():rotateToken();
 $('importHistory').onclick=async()=>{const button=$('importHistory');button.disabled=true;try{const data=await api('history/import','POST');$('importOutput').textContent='Imported '+number(data.imported)+'; skipped '+number(data.skipped)+(data.errors?.length?' · '+data.errors.map(e=>typeof e==='string'?e:e.path+': '+e.error).join('; '):'');progressData=null}catch(e){$('importOutput').textContent=e.message}finally{button.disabled=false}};
-$('progressTab').onclick=()=>setTab('progress');$('settingsTab').onclick=()=>setTab('settings');$('detailClose').onclick=()=>$('characterDetails').close();$('characterDetails').addEventListener('close',()=>{detailRequest++;for(const row of $('sessionList').querySelectorAll('.selected'))row.classList.remove('selected')});for(const b of document.querySelectorAll('[data-detail]'))b.onclick=()=>{detailSection=b.dataset.detail;renderDetail()};for(const id of ['liveSearch','liveRealm','liveSort','liveAccount'])$(id).addEventListener('input',renderSessions);$('layoutToggle').onclick=()=>{tableMode=!tableMode;localStorage.setItem('gempy.layout',tableMode?'table':'cards');renderSessions()};$('showDismissed').onclick=()=>{dismissed.clear();renderSessions()};$('progressPeriod').onchange=loadProgress;$('progressStart').onchange=loadProgress;$('progressEnd').onchange=loadProgress;$('progressRealm').onchange=renderProgress;$('progressAccount').onchange=renderProgress;$('progressSearch').oninput=renderProgress;$('progressRefresh').onclick=loadProgress;
+$('progressTab').onclick=()=>setTab('progress');$('settingsTab').onclick=()=>setTab('settings');$('detailClose').onclick=()=>$('characterDetails').close();$('characterDetails').addEventListener('close',()=>{detailRequest++;for(const row of $('sessionList').querySelectorAll('.selected'))row.classList.remove('selected')});for(const b of document.querySelectorAll('[data-detail]'))b.onclick=()=>{detailSection=b.dataset.detail;renderDetail()};$('progressPeriod').onchange=loadProgress;$('progressStart').onchange=loadProgress;$('progressEnd').onchange=loadProgress;$('progressRealm').onchange=renderProgress;$('progressAccount').onchange=renderProgress;$('progressSearch').oninput=renderProgress;$('progressRefresh').onclick=loadProgress;
 const editDialog=document.createElement('dialog');editDialog.id='rosterEditDialog';const editTitle=text('h2','Edit character'),editForm=document.createElement('form');const nameLabel=text('label','Character name','field'),editName=document.createElement('input');editName.required=true;editName.pattern='[A-Za-z]{1,50}';nameLabel.append(editName);const accountLabel=text('label','Account label','field'),editAccount=document.createElement('input');editAccount.required=true;editAccount.maxLength=100;accountLabel.append(editAccount);const editActions=text('div','','dialog-actions'),editCancel=actionButton('Cancel',()=>editDialog.close(),'secondary',null),editSave=text('button','Save','primary');editSave.type='submit';editActions.append(editCancel,editSave);editForm.append(nameLabel,accountLabel,editActions);editDialog.append(editTitle,editForm);document.body.append(editDialog);let editTarget=null;
 function editRoster(character,account){editTarget={character,account};editTitle.textContent=character?'Edit '+character:'Rename account';nameLabel.hidden=!character;editName.required=!!character;editName.value=character||'';editAccount.value=account;editDialog.showModal()}
 editForm.onsubmit=async e=>{e.preventDefault();editSave.disabled=true;try{const data=editTarget.character?await api('characters','PATCH',{character:editTarget.character,account:editAccount.value,new_character:editName.value}):await api('accounts','PATCH',{account:editTarget.account,new_account:editAccount.value});updateAccounts(data.accounts||(await api('characters')).accounts);editDialog.close();message('Roster updated.','success')}catch(error){message(error.message,'error')}finally{editSave.disabled=false}};
-const originalAccounts=updateAccounts;updateAccounts=function(data){originalAccounts(data);for(const id of ['liveAccount','progressAccount']){const selected=$(id).value;$(id).replaceChildren(text('option','All accounts'));$(id).firstChild.value='';for(const account of Object.keys(accounts).sort((a,b)=>a.localeCompare(b))){const option=text('option',account);option.value=account;$(id).append(option)}if(Object.hasOwn(accounts,selected))$(id).value=selected}};
+const originalAccounts=updateAccounts;updateAccounts=function(data){originalAccounts(data);for(const id of ['progressAccount']){const selected=$(id).value;$(id).replaceChildren(text('option','All accounts'));$(id).firstChild.value='';for(const account of Object.keys(accounts).sort((a,b)=>a.localeCompare(b))){const option=text('option',account);option.value=account;$(id).append(option)}if(Object.hasOwn(accounts,selected))$(id).value=selected}};
 const originalCharacters=renderCharacters;renderCharacters=function(){originalCharacters();for(const card of $('accounts').children){const account=card.querySelector('.account-name')?.textContent;if(!account)continue;card.querySelector('.account-heading').append(actionButton('Rename',()=>editRoster(null,account),'roster-edit',null));for(const row of card.querySelectorAll('.character')){const name=row.querySelector('.character-name').textContent;row.querySelector('.character-info').append(actionButton('Edit',()=>editRoster(name,account),'roster-edit',null))}}};
 
 const renderSessionsWithData=renderSessions;renderSessions=function(){const focused=document.activeElement, label=focused?.getAttribute('aria-label');const hadFocus=$('sessionList').contains(focused);renderSessionsWithData();if(hadFocus&&label){const button=[...$('sessionList').querySelectorAll('button')].find(b=>b.getAttribute('aria-label')===label);button?.focus({preventScroll:true})}};
@@ -487,5 +551,9 @@ const originalStart=start;start=async function(){await originalStart();await loa
 
 setInterval(()=>{for(const el of document.querySelectorAll('[data-duration-end]'))el.textContent=humanDuration(Number(el.dataset.durationEnd)-Date.now()/1000);for(const el of document.querySelectorAll('[data-effect-end]')){const remaining=Math.max(0,Math.round(Number(el.dataset.effectEnd)-Date.now()/1000));el.textContent=Math.floor(remaining/60)+'m '+remaining%60+'s'}},1000);let pollTimer;function configurePolling(interval=3){clearInterval(pollTimer);const seconds=Math.max(1,Number(interval)||3);pollTimer=setInterval(refresh,seconds*1000);$('pollLabel').textContent='Updates every '+seconds+' seconds'}configurePolling();api('auth').then(async result=>{csrf=result.csrf;await start()}).catch(()=>{});
 </script>
+<script src="/assets/profiles.js"></script>
+<script src="/assets/rotation.js"></script>
+<script src="/assets/comparison.js"></script>
+<script src="/assets/workspace.js"></script>
 </body>
 </html>

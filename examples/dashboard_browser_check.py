@@ -64,14 +64,13 @@ with tempfile.TemporaryDirectory() as directory:
         page.wait_for_selector('.live-card')
         assert page.locator('.live-card').count()==3
         assert page.locator('#characters').is_hidden()
-        page.locator('#liveRealm').select_option('prime');assert page.locator('.live-card').count()==2
-        page.locator('#liveRealm').select_option('')
+        assert page.locator('#sessions .live-filters').count()==0
         page.screenshot(path='/tmp/gempy-live-desktop.png',full_page=True)
         page.locator('.character-link').first.click()
         page.screenshot(path='/tmp/gempy-inspector-desktop.png',full_page=True)
-        page.locator('[data-detail=experience]').click()
+        page.locator('#detailContent').get_by_text('Experience & training',exact=True).click()
         page.locator('.pin-options input').first.check()
-        page.locator('[data-detail=bonuses]').click()
+        page.locator('#detailContent').get_by_text('Cycle & donation details',exact=True).click()
         page.locator('[data-detail=history]').click()
         page.wait_for_function("() => !document.querySelector('#detailContent').textContent.includes('Loading history')")
         page.locator('#detailClose').click()
@@ -100,8 +99,6 @@ with tempfile.TemporaryDirectory() as directory:
         page.locator('#rosterEditDialog button[type=submit]').click()
         page.wait_for_function("() => document.querySelector('#accounts').textContent.includes('Moved')")
         page.locator('#sessionsTab').click()
-        page.locator('#layoutToggle').click()
-        page.locator('#layoutToggle').click()
         page.set_viewport_size({'width':390,'height':844})
         page.screenshot(path='/tmp/gempy-live-mobile.png',full_page=True)
         assert page.evaluate('() => document.documentElement.scrollWidth<=window.innerWidth'), 'Mobile overflow'

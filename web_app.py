@@ -177,6 +177,38 @@ def create_app(config, service=None, directory=None, session_seconds=SESSION_SEC
     def index():
         return FileResponse(Path(__file__).parent / 'static/index.html', headers={'Cache-Control': 'no-store'})
 
+    @app.get('/assets/profiles.js')
+    def profile_script():
+        return FileResponse(Path(__file__).parent / 'static/profiles.js', media_type='text/javascript',
+                            headers={'Cache-Control': 'no-store'})
+
+    @app.get('/assets/profiles.css')
+    def profile_styles():
+        return FileResponse(Path(__file__).parent / 'static/profiles.css', media_type='text/css',
+                            headers={'Cache-Control': 'no-store'})
+
+    @app.get('/assets/rotation.js')
+    def rotation_script():
+        return FileResponse(Path(__file__).parent / 'static/rotation.js', media_type='text/javascript', headers={'Cache-Control': 'no-store'})
+
+    @app.get('/assets/rotation.css')
+    def rotation_styles():
+        return FileResponse(Path(__file__).parent / 'static/rotation.css', media_type='text/css', headers={'Cache-Control': 'no-store'})
+
+    @app.get('/assets/images/saga/{asset}')
+    def saga_bonus_icon(asset: str):
+        if asset not in ('lumnis.webp', 'lumnis-grayscale.webp', 'tutelage.webp', 'tutelage-grayscale.webp'):
+            raise HTTPException(404, 'Unknown asset.')
+        return FileResponse(Path(__file__).parent / 'static/images/saga' / asset, media_type='image/webp')
+
+    @app.get('/assets/{asset}')
+    def workspace_asset(asset: str):
+        if asset not in ('workspace.js', 'comparison.js', 'workspace.css'):
+            raise HTTPException(404, 'Unknown asset.')
+        return FileResponse(Path(__file__).parent / 'static' / asset,
+                            media_type='text/css' if asset.endswith('.css') else 'text/javascript',
+                            headers={'Cache-Control': 'no-store'})
+
     @app.middleware('http')
     async def security_headers(request, call_next):
         response = await call_next(request)
@@ -184,7 +216,7 @@ def create_app(config, service=None, directory=None, session_seconds=SESSION_SEC
         response.headers['Referrer-Policy'] = 'no-referrer'
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['X-Frame-Options'] = 'DENY'
-        response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'"
+        response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'"
         return response
 
     async def json_body(request):
@@ -341,6 +373,51 @@ def create_app(config, service=None, directory=None, session_seconds=SESSION_SEC
     def list_sessions(request: Request):
         authenticated(request)
         return {'sessions': telemetry.enrich(service.sessions())}
+
+    def profile_record(realm, character):
+        if realm not in ('prime', 'test', 'fallen'):
+            raise HTTPException(400, 'Unknown realm.')
+        account = next((label for label, names in config.get('accounts', {}).items()
+                        if any(name.casefold() == character.casefold() for name in names)), None)
+        profile = telemetry.profile(realm, character)
+        if profile is None:
+            if account is None:
+                raise HTTPException(404, 'Unknown character.')
+            name = next(name for name in config['accounts'][account] if name.casefold() == character.casefold())
+            profile = dict(character=name, realm=realm, snapshot={}, updated_at=None,
+                           observed_at={}, field_observed_at={})
+        return dict(profile, account=account or '')
+
+    @app.get('/api/profiles')
+    def list_profiles(request: Request, realm: str = 'prime'):
+        authenticated(request)
+        if realm not in ('prime', 'test', 'fallen'):
+            raise HTTPException(400, 'Unknown realm.')
+        names = {name.casefold(): name for names in config.get('accounts', {}).values() for name in names}
+        with telemetry.lock:
+            for row in telemetry.db.execute('SELECT DISTINCT character FROM profile_sections WHERE realm=?', (realm,)):
+                names.setdefault(row['character'].casefold(), row['character'])
+            return {'profiles': [profile_record(realm, name) for name in sorted(names.values(), key=str.casefold)]}
+
+    @app.get('/api/profiles/{realm}/{character}')
+    def get_profile(realm: str, character: str, request: Request):
+        authenticated(request)
+        return profile_record(realm, character)
+
+    @app.get('/api/rotation')
+    def weekly_rotation(request: Request, realm: str = 'prime'):
+        authenticated(request)
+        if realm not in ('prime', 'test', 'fallen'):
+            raise HTTPException(400, 'Unknown realm.')
+        from weekly_rotation import build_rotation
+        entries=(config.get('weekly_rotation') or {}).get('characters') or []
+        profiles=[]
+        with telemetry.lock:
+            for entry in entries:
+                if isinstance(entry,dict) and isinstance(entry.get('name'),str):
+                    profile=telemetry.profile(realm,entry['name'])
+                    if profile:profiles.append(profile)
+        return build_rotation(config,profiles,service.sessions(),time.time(),realm)
 
     def submit(action, hostname):
         operation_id = secrets.token_urlsafe(16)

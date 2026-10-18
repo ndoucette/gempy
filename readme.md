@@ -1,4 +1,90 @@
+## Character workspace usability
+
+Use **Open character** in the shared header to inspect a character from any view.
+Inside a profile, **Character to inspect** switches characters while keeping the
+current section and skill filters. **Compare with** shows aligned Overview,
+Stats, Skills or History values for two explicit character/realm identities.
+Stats comparison offers base, normal and enhanced values with bonuses; unknown
+values remain distinct from zero. Select **No comparison** for the full profile,
+including live status, effects, training and other detailed observations.
+
+Views and profile/comparison links now survive refresh and browser Back/Forward.
+View filters are remembered within the browser tab. Progress drilldowns retain
+the selected period, including custom dates. The roster keeps exact weekly/stored
+balances visible and puts the complete cycle/resource summary in an expandable
+section. All five navigation destinations remain visible on phones.
+
+See the [UX audit](docs/ux/audit.md), [redesign proposal](docs/ux/redesign.md) and
+[validation results and screenshots](docs/ux/validation.md). New isolated checks:
+`.venv/bin/python examples/ux_browser_check.py` and
+`.venv/bin/python examples/ux_resilience_check.py` (Playwright Chromium required).
+Restart the Gempy web process for the new asset routes, then reload the browser.
+
 ## Persistent web service
+
+Live shows two character cards per row on wide desktops and one per row on smaller
+screens. Each card has Character and Vitals columns, which stack on phones.
+Open client and Disconnect icons sit beside the name and realm; clicking the level
+opens the profile. The desktop sidebar can collapse to an icon strip using its top
+arrow; the browser remembers your choice. Current location and Lich room
+ID appear below the character name, above their level. Weekly and Stored resource
+counts appear beneath each character's status, and XP bonuses sit beneath Vitals
+in both layouts. Fresh critical health/spirit states stand
+out; reporting timestamps stay in tooltips, and experience metrics are available
+in the character profile. Refresh the browser to load these UI changes.
+
+**Rotation** is a weekly hunting view for configured main characters and enchanting
+wizards. Wizard completion requires current-cycle Lumnis spent and weekly essence
+earnings at the reported cap (or the configured weekly target). Exact earned and
+stored balances, Pacific AM/PM renewal dates, upcoming deadlines and account occupancy
+are visible. Filter by account or completion, or group by account. Main character
+Lumnis summaries are separate; their section folds away on phones.
+
+Configure membership and account roles in `weekly_rotation` (see config-sample.yaml).
+The view uses stored game observations and never imports old note balances as live
+progress. Missing reports and passed renewals require an update. For cycle attribution,
+it conservatively checks observations against the calendar week preceding the reported
+next renewal in Eastern time, with a minute of rounding tolerance. Offline completion
+remains visible only while its observations belong to that cycle. A new launch is
+disabled in this view when another character on that account is already running.
+
+Character names in **Characters** now open a persistent profile, including while
+offline. Profiles use four tabs: **Overview**, **Stats**, **Skills**, and **History**.
+Overview keeps exact weekly and stored resource balances alongside Lumnis and
+donations; live status and experience/training remain available in expandable
+sections. Stats separates base, normal and enhanced values and bonuses. Prime and Test retain
+separate profiles. Unreported fields show a dash; each profile section includes
+its observation time. Profile data is included in the existing SQLite backup.
+
+Live and roster summaries show exact profession resource numbers, for example
+`Essence · Weekly: 32,450 · Total: 118,750`. The detailed profile separates
+**Earned this cycle (weekly)** from **Total stored**, and shows caps read from the
+game's `RESOURCE` response. Weekly earnings are not the spendable balance.
+Temple donations prepaid for future cycles appear separately from the observed
+Lumnis phase. Passing a reported refresh time does not automatically reset counters
+or mark a new cycle active; Gempy waits for a game observation.
+
+Live cards use the installed Saga client's Lumnis and Tutelage artwork. Lumnis
+shows its multiplier over the colored icon while active; expired bonuses use
+grayscale artwork. Tutelage is colored when eligible and has a steady gold glow
+while active. Hover or focus either icon for status, prepaid cycles, and remaining
+Tutelage days; clicking opens the character profile. A countdown in whole days and
+hours appears beside the icons. Asset provenance is recorded in `static/images/saga/SOURCE.txt`.
+
+Install the updated `scripts/gempy_reporter.lic` in Lich's `scripts/custom/`
+(or download it from Settings) and restart the reporter on each running character
+with `;kill gempy_reporter` then `;gempy_reporter`. Existing character-specific
+URL/token settings are retained. The reporter quietly requests `INFO FULL`,
+`SKILL`, `LUMNIS INFO`, `RESOURCE` and `EXPERIENCE` in a bounded startup sequence,
+then rotates them at its configured command interval. It also observes manually
+requested reports. Stats and skills refresh less often than vitals. Old reporters
+remain compatible but cannot populate the new stats and skills sections.
+
+After installing backend changes, restart the Gempy web process and reload the
+browser. Restarting Gempy leaves game and frontend sessions connected.
+
+Additional checks: `ruby test_reporter_profiles.rb` and
+`.venv/bin/python examples/profile_browser_check.py` (requires Playwright Chromium).
 
 The web workspace has **Live**, **Progress**, **Characters**, and **Settings** views.
 Live combines session/client controls with reported character vitals, location,
