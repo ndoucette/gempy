@@ -1,5 +1,5 @@
 =begin
-Gempy live telemetry reporter, version 1.2.1. Requires Lich 5.11+.
+Gempy live telemetry reporter, version 1.4.0. Requires Lich 5.11+.
 ;gempy_reporter --url=http://127.0.0.1:8080/api/telemetry/update --token=TOKEN
 Settings are character-specific and separate from kmon/Saga settings.
 =end
@@ -13,7 +13,7 @@ hide_me
 silence_me
 
 module GempyReporter
-  VERSION = '1.2.1'.freeze
+  VERSION = '1.4.0'.freeze
   AREAS = %w[nsys head neck chest abdomen back leftArm rightArm leftHand rightHand leftLeg rightLeg leftFoot rightFoot leftEye rightEye].freeze
   @settings = { 'url' => 'http://127.0.0.1:8080/api/telemetry/update', 'interval' => 3,
                 'command_interval' => 120, 'enabled' => true }.merge(CharSettings[:gempy_reporter] || {})
@@ -24,12 +24,22 @@ module GempyReporter
   @stats = {}
   @skills = nil
   @resources = {}
+  @wealth = {}
+  @bank_report = nil
   @profile_observed = {}
   @availability = {}
   @started = Time.now
   @samples = []
   @last_error = Time.at(0)
   @hook_id = "gempy_reporter_#{@reporter_id}"
+  @login_rewards = {}
+  @checkin_context = begin
+    value = JSON.parse(ENV.fetch('GEMPY_CHECKIN_CONTEXT', 'null'))
+    value if value.is_a?(Hash) && value['capture_id'].to_s.match?(/\A[a-f0-9]{48}\z/)
+  rescue JSON::ParserError
+    nil
+  end
+  @checkin_ready = false
 
   def self.safe
     yield
@@ -92,6 +102,10 @@ module GempyReporter
     now = Time.now.to_i
     original_line = line
     plain = line.gsub(/<[^>]*>/, '')
+    if plain =~ /^\s*Current Login Streak:\s*(\d+) days?/
+      streak = Regexp.last_match(1).to_i
+      @login_rewards = { streak: streak, observed_at: now } if (1..30).cover?(streak)
+    end
     # These layouts match INFO FULL, SKILL and RESOURCE in the installed Lich parser.
     if plain =~ /^\s*(\w+)\s+\((?:STR|CON|DEX|AGI|DIS|AUR|LOG|INT|WIS|INF)\):(?:\s+(\d+)\s+\((-?\d+)\)\s+\.{3})?\s+(\d+)\s+\((-?\d+)\)\s+\.{3}\s+(\d+)\s+\((-?\d+)\)/
       name, base, base_bonus, value, bonus, enhanced, enhanced_bonus = Regexp.last_match.captures
@@ -117,10 +131,35 @@ module GempyReporter
     end
     if plain =~ /^(Essence|Necrotic Energy|Lore Knowledge|Motes of Tranquility|Devotion|Nature's Grace|Grit|Luck Inspiration|Guile|Vitality):\s*([\d,]+)\/([\d,]+)\s+\(Weekly\)\s+([\d,]+)\/([\d,]+)\s+\(Total\)/
       kind, weekly, cap_weekly, total, cap_total = Regexp.last_match.captures
-      @resources = { type: kind, weekly: weekly.delete(',').to_i, total: total.delete(',').to_i,
+      @resources.merge!({ type: kind, weekly: weekly.delete(',').to_i, total: total.delete(',').to_i,
                      max_weekly: cap_weekly.delete(',').to_i, max_total: cap_total.delete(',').to_i,
-                     observed_at: now }
+                     observed_at: now })
       @profile_observed['resources'] = now
+    end
+    # Formats mirror Lich's Infomon suffused/LTE and Bank ACCOUNT_TOTAL parsers.
+    if plain =~ /^Suffused (?:Essence|Necrotic Energy|Lore Knowledge|Motes of Tranquility|Devotion|Nature's Grace|Grit|Luck Inspiration|Guile|Vitality):\s*([\d,]+)\s*$/
+      @resources[:suffused] = Regexp.last_match(1).delete(',').to_i
+      @resources[:suffused_observed_at] = now
+      @profile_observed['resources'] = now
+    end
+    if plain =~ /^\s*Long-Term Exp:\s*[\d,]+\s+Deeds:\s*(\d+)\s*$/
+      @wealth[:deeds] = Regexp.last_match(1).to_i
+      @wealth[:deeds_observed_at] = now
+    end
+    # A total is meaningful only inside an all-bank listing completed by a prompt.
+    @bank_report = nil if @bank_report && now - @bank_report[:started] > 5
+    if plain.include?('You currently have the following amounts on deposit')
+      @bank_report = { started: now }
+    elsif @bank_report && plain =~ /^\s+Total:\s*([\d,]+)\s*$/
+      @bank_report[:total] = Regexp.last_match(1).delete(',').to_i
+    end
+    @bank_report = nil if plain.match?(/you don't have access/i)
+    if @bank_report && original_line.match?(/<prompt\b/)
+      unless @bank_report[:total].nil?
+        @wealth[:bank_balance] = @bank_report[:total]
+        @wealth[:bank_balance_observed_at] = now
+      end
+      @bank_report = nil
     end
     if line.include?("dialogData id='expr'") || line.include?('dialogData id="expr"')
       { 'exp' => :lifetime_exp, 'ascension_exp' => :ascension_exp, 'field_exp' => :field_experience_current,
@@ -250,6 +289,7 @@ module GempyReporter
       resource[:voln_favor] = safe { Society.status =~ /Voln/ ? Resources.voln_favor : nil }
       resource
     end
+    data[:wealth] = section('wealth') { @wealth.dup }
     data[:experience] = section('experience') do
       exp = @experience.dup
       exp[:lifetime_exp] = safe { Stats.exp } || exp[:lifetime_exp]
@@ -300,6 +340,8 @@ module GempyReporter
         silver_today: safe { defined?(Ledger) ? Ledger::Character.daily : UserVars.bank_silver_per_day },
         bounty_points: safe { defined?(BountyHUD) ? BountyHUD.metadata.dig(:earned, :recent) : UserVars.bank_bounty_per_day } }
     end
+    data[:login_rewards] = @login_rewards.dup
+    data[:checkin] = @checkin_receipt if @checkin_receipt
     data[:metadata] = { timestamp: Time.now.to_i, script_version: VERSION, update_interval: @settings['interval'], availability: @availability.dup }
     @profile_observed.each do |name, observed|
       data[:metadata][:availability][name] = { available: true, collected_at: observed }
@@ -321,15 +363,94 @@ module GempyReporter
     request.body = JSON.generate(data)
     response = http.request(request)
     raise "HTTP #{response.code}" unless response.is_a?(Net::HTTPSuccess)
+    JSON.parse(response.body.to_s.empty? ? '{}' : response.body)
+  end
+
+  # Call this at the successful end of the character's finite login script.
+  # Merely sleeping, or seeing a script disappear, is not a success signal.
+  def self.checkin_ready!
+    @checkin_ready = true
+  end
+
+  def self.accept_checkin_response(response)
+    return unless @checkin_context && response.is_a?(Hash)
+    if response['checkin_release'] == @checkin_context['capture_id']
+      @checkin_context = @checkin_request = @checkin_receipt = nil
+      return
+    end
+    request = response['checkin_request']
+    return unless request.is_a?(Hash) && request['capture_id'] == @checkin_context['capture_id']
+    return if @checkin_request # An identical retransmission must not reset progress.
+    @checkin_request = request
+    @checkin_index = 0
+    @checkin_fields = {}
+    @checkin_receipt = { capture_id: request['capture_id'], phase: 'startup', startup_ready: false }
+  end
+
+  def self.checkin_step
+    return false unless @checkin_request
+    return true if @checkin_receipt[:phase] == 'captured'
+    ready = @checkin_ready || @checkin_context['startup_mode'] == 'none'
+    return false unless ready
+    @checkin_receipt.merge!(startup_ready: true, phase: 'capturing')
+    commands = ['info full', 'skill', 'lumnis info', 'resource', 'experience', 'boost info', 'bank account']
+    command = commands[@checkin_index]
+    lines = Array(refresh_command(command))
+    plain = lines.map { |line| line.gsub(/<[^>]*>/, '') }.join("\n")
+    # Only this command's complete response can certify an observation. Cached
+    # Char/Stats values and old downstream observations never advance the barrier.
+    finished = lines.any? { |line| line.match?(/<prompt\b/) }
+    now = Time.now.to_i
+    mark = lambda do |field, matched|
+      @checkin_fields[field] = { status: finished && matched ? 'captured' : 'unavailable', observed_at: now }
+    end
+    case command
+    when 'info full'
+      mark.call('character', plain.match?(/^\s*Name:\s*\S+/) && !safe { Char.name }.to_s.empty?)
+      mark.call('stats', plain.scan(/\((?:STR|CON|DEX|AGI|DIS|AUR|LOG|INT|WIS|INF)\):/).length == 10)
+      @checkin_receipt[:presence_at] = now if @checkin_fields['character'][:status] == 'captured'
+    when 'skill'
+      mark.call('skills', plain.match?(/your current skill bonuses and ranks/) && plain.match?(/^Training Points:/))
+    when 'lumnis info'
+      mark.call('bonuses', plain.match?(/Your Gift of Lumnis|You have .*points? of .*experience|Because your account is free,/))
+    when 'resource'
+      mark.call('resources', plain.match?(/:\s*[\d,]+\/[\d,]+\s+\(Weekly\)\s+[\d,]+\/[\d,]+\s+\(Total\)/))
+    when 'experience'
+      mark.call('experience', plain.match?(/\bExperience:\s*[\d,]+/))
+      mark.call('deeds', plain.match?(/Long-Term Exp:\s*[\d,]+\s+Deeds:\s*\d+/))
+    when 'boost info'
+      mark.call('reward_info', plain.match?(/Current Login Streak:\s*\d+ days?/) && @login_rewards[:observed_at] == now)
+      @checkin_receipt[:streak] = @login_rewards[:streak] if @checkin_fields['reward_info'][:status] == 'captured'
+    when 'bank account'
+      mark.call('bank', !@wealth[:bank_balance].nil? && @wealth[:bank_balance_observed_at] == now && !lines.empty?)
+    end
+    @checkin_index += 1
+    @checkin_receipt[:fields] = @checkin_fields.dup
+    @checkin_receipt[:phase] = 'captured' if @checkin_index >= commands.length
+    true
+  rescue StandardError
+    # A capture failure remains visible and is cleaned up by the coordinator's
+    # deadline; do not kill the reporter or falsely acknowledge a complete batch.
+    @checkin_receipt[:phase] = 'capturing' if @checkin_receipt
+    true
   end
 
   # Suppress only the requested report, bounded by its first line and prompt.
   # Parse the captured lines explicitly so collection does not depend on hook order.
   def self.refresh_command(command)
+    # Remote BANK ACCOUNT can consume a bank-runner use; query only at a bank.
+    if command == 'bank account'
+      at_bank = safe { Room.current&.tags.to_a.include?('bank') || XMLData.room_title == '[Pinefar, Depository]' }
+      return unless at_bank
+    end
     start = if %w[skill].include?(command) || command == 'info full'
               /<output class=["']mono["']\s*\/>|<a exist=|^Name:|\(at level \d+\), your current skill/
             elsif command == 'lumnis info'
               /<output class=["']mono["']\s*\/>|Your Gift of Lumnis|You have .*points? of .*experience|Because your account is free,/
+            elsif command == 'bank account'
+              /<output class=["']mono["']\s*\/>|You currently have the following amounts on deposit|You currently have an account|you don't have access/i
+             elsif command == 'boost info'
+              /<output class=["']mono["']\s*\/>|Login Rewards information|Current Login Streak:/
             else
               /<output class=["']mono["']\s*\/>|^Health: |^Experience: /
             end
@@ -348,15 +469,17 @@ module GempyReporter
     command_index = 0
     loop do
       begin
-        if Time.now >= next_command
+        checking_in = checkin_step
+        if !checking_in && !@checkin_context && Time.now >= next_command
           # One bounded command per turn; profiles refresh less often than live monitoring.
-          commands = ['info full', 'skill', 'lumnis info', 'resource', 'experience', 'lumnis info', 'resource']
+          commands = ['info full', 'skill', 'lumnis info', 'resource', 'experience', 'lumnis info', 'resource', 'bank account']
           refresh_command(commands[command_index % commands.length])
           command_index += 1
           next_command = Time.now + (command_index < commands.length ? @settings['interval'] : @settings['command_interval'])
         end
         data = collect
-        send_to(@settings['url'], data, token: @settings['token'])
+        reply = send_to(@settings['url'], data, token: @settings['token'])
+        accept_checkin_response(reply)
         if @settings['legacy-url']
           safe { send_to(@settings['legacy-url'], data) }
         end

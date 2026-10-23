@@ -56,6 +56,8 @@ def create_app(config, service=None, directory=None, session_seconds=SESSION_SEC
     config_path = Path(config_path).expanduser().resolve()
     from telemetry import TelemetryStore
     telemetry = TelemetryStore(directory)
+    from daily_checkin import CheckinCoordinator
+    checkin = CheckinCoordinator(config, service, telemetry)
     try:
         credentials = json.loads((directory / 'auth.json').read_text())
     except FileNotFoundError:
@@ -66,12 +68,15 @@ def create_app(config, service=None, directory=None, session_seconds=SESSION_SEC
 
     @asynccontextmanager
     async def lifespan(app):
+        checkin.start()
         yield
+        checkin.close()
         executor.shutdown(wait=False, cancel_futures=True)
         telemetry.close()
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.telemetry = telemetry
+    app.state.checkin = checkin
 
     def reporter_digest():
         try:
@@ -104,7 +109,10 @@ def create_app(config, service=None, directory=None, session_seconds=SESSION_SEC
                 raise HTTPException(413, 'Telemetry snapshot is too large.')
         try:
             body = json.loads(raw)
-            return telemetry.ingest(body, service.sessions())
+            receipt = telemetry.ingest(body, service.sessions())
+            # Ingest has committed before a capture can authorize cleanup.
+            receipt.update(checkin.report(body, receipt['session_id']))
+            return receipt
         except RecursionError:
             raise HTTPException(400, 'Telemetry snapshot is too deeply nested.') from None
         except (ValueError, TypeError) as error:
@@ -203,7 +211,7 @@ def create_app(config, service=None, directory=None, session_seconds=SESSION_SEC
 
     @app.get('/assets/{asset}')
     def workspace_asset(asset: str):
-        if asset not in ('workspace.js', 'comparison.js', 'workspace.css'):
+        if asset not in ('workspace.js', 'comparison.js', 'workspace.css', 'status.js', 'status.css', 'checkin.js', 'checkin.css'):
             raise HTTPException(404, 'Unknown asset.')
         return FileResponse(Path(__file__).parent / 'static' / asset,
                             media_type='text/css' if asset.endswith('.css') else 'text/javascript',
@@ -296,7 +304,11 @@ def create_app(config, service=None, directory=None, session_seconds=SESSION_SEC
             raise HTTPException(400, 'Use a character name containing only letters (up to 50).')
         if rename_account and (not isinstance(new_account, str) or not new_account.strip() or len(new_account.strip()) > 100 or any(ord(c) < 32 for c in new_account)):
             raise HTTPException(400, 'Use an account label of 1–100 characters.')
-        with lock:
+        with lock, telemetry.lock:
+            try:
+                checkin.assert_roster_editable()
+            except ValueError as error:
+                raise HTTPException(409, str(error)) from None
             temporary = None
             try:
                 # Read the current file so unrelated settings edited since startup survive.
@@ -485,4 +497,6 @@ def create_app(config, service=None, directory=None, session_seconds=SESSION_SEC
                 raise HTTPException(404)
             return {key: item for key, item in value.items() if key != 'time'}
 
+    from checkin_api import register_checkin_routes
+    register_checkin_routes(app, checkin, authenticated, json_body)
     return app

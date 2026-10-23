@@ -519,6 +519,40 @@ To start the launcher on the test server by default, set `default_realm: test` i
 
 ## Troubleshooting
 
+### Character Status overview
+
+The **Status** navigation item shows every configured character using its latest
+stored profile, whether or not it has a running session. Account is the third
+column. Every column can be sorted; filters cover name/account/profession,
+Lumnis, Tutelage, and an optional numeric range (weekly completion uses percent,
+reset time uses hours). Filters and sorting are remembered in the browser tab.
+Choose **Character status** in Settings to make it the default view.
+
+Values are last reported observations, not promises of current state. Hover a
+cell for its observation time. A dash or hollow square means unknown, not zero
+or absent. A passed reset is shown as Ready; a newer active report with an obsolete
+reset date shows an unknown reset until the game supplies a new date.
+
+After updating GemPy, restart its web process and refresh the page. For the new
+Suffused Resource, Bank Balance, and Deeds fields, install the updated
+`scripts/gempy_reporter.lic` (version 1.3.0, also downloadable from Settings)
+in the active Lich installation's custom scripts directory, then restart
+`gempy_reporter` for each running character. No token rotation is needed.
+Existing reporters remain compatible but cannot populate the new fields.
+
+- Suffused resources are read from `RESOURCE`; deeds from `EXPERIENCE`.
+- Bank Balance is the **Total** from a complete `BANK ACCOUNT` all-bank listing,
+  not carried silver, a local bank balance, or daily silver earned.
+- The reporter observes bank listings issued by other scripts and periodically
+  requests one while at a bank. It does not automatically request remote bank
+  runner services. To fill a missing balance promptly, run `BANK ACCOUNT` while
+  at a bank with the reporter running. Missing or incomplete reports preserve
+  the previous observation.
+- Rotation is unchanged by this feature.
+
+Focused checks: `node --test test_status.js test_tutelage.js test_connections.js`,
+`python -m unittest test_status_profiles`, and `ruby test_reporter_status.rb`.
+
 - **"Unsupported Operating System" Error:**
   - Ensure you're running the script on a supported system (Linux, macOS, or WSL).
 - **"Configuration File Not Found" Error:**
@@ -534,6 +568,51 @@ To start the launcher on the test server by default, set `default_realm: test` i
   - Verify permissions on the Lich and Profanity binaries.
 - **Ruby Not Found:**
   - Ensure that Ruby is installed and the `ruby` command is available in your PATH.
+
+## Daily Check-in (staged; live execution disabled)
+
+The **Daily Check-in** page adds account queues, overall progress, a selected
+character's startup/capture/logout timeline, pause/resume/stop, retry, run history,
+and an Eastern-time schedule editor. **Preview with sample data** is entirely
+local to the browser and never submits game operations.
+
+The coordinator persists runs, account reservations, capture receipts, and events
+in the existing telemetry database. Different accounts can run in parallel; each
+account is serialized across check-ins and manual GemPy launches. Existing online
+characters block their account and are never adopted or disconnected by a sweep.
+Current capture IDs, parsed values, and field timestamps must be saved before
+orderly cleanup. An optional missing bank balance does not fail the check-in.
+
+`daily_checkin.allow_live_operations` defaults to **false**, independently of the
+saved schedule. Keep it false until the deferred supervised pilot is complete.
+The implementation session did not change the running configuration, restart
+GemPy, deploy the reporter, or operate any game sessions.
+
+For the later pilot, reporter 1.4.0 must be installed and autostarted on each
+character. The default `startup_mode: ack` waits for the successful end of a
+finite login script to call `GempyReporter.checkin_ready!` after the reporter has
+loaded. Use `startup_mode: none` only for characters with no startup work that
+must finish. A missing acknowledgment times out visibly; elapsed time never
+certifies script success. The global mode currently applies to the entire run.
+
+Pause stops new launches; Stop cancels queued work and finishes owned-session
+cleanup. **Keep session for play** disarms cleanup before attaching through
+GemPy. Interrupted or uncertain sessions remain reserved for inspection. After
+closing a leftover session manually, Retry can resolve its reservation, including
+from run history. There are no automatic failure retries; scheduled freshness
+catch-up is limited to one additional window per game day.
+
+Before live activation, verify Lich-side arbitration for direct external client
+attachments. GemPy blocks its own attachments until takeover and rechecks socket
+ownership before cleanup, but external clients can still race an exit command.
+An autonomous cleanup watchdog is deferred. Ruby reporter fixtures, FastAPI route
+tests, browser rendering, and the supervised single-character login/logout pilot
+remain to be run in a compatible environment.
+
+Offline checks: `python -m unittest test_daily_checkin test_checkin_service
+test_checkin_api` and `node --test test_checkin.js`. Reporter fixture:
+`ruby test_reporter_checkin.rb`. The optional `examples/checkin_preview_server.py`
+serves only synthetic data and static assets, with all mutations rejected.
 
 ## License
 

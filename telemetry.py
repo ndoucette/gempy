@@ -75,7 +75,7 @@ class TelemetryStore:
                 raise ValueError(f'Invalid {k}')
         if cfg['expiry_seconds'] <= cfg['stale_seconds']:
             raise ValueError('Expiry must exceed stale interval')
-        if cfg['density'] not in ('comfortable','compact') or cfg['default_view'] not in ('live','progress','characters','settings','rotation'):
+        if cfg['density'] not in ('comfortable','compact') or cfg['default_view'] not in ('live','progress','characters','settings','rotation','status','checkin'):
             raise ValueError('Invalid display setting')
         from client_options import CLIENTS
         if not isinstance(cfg['default_client'],str) or cfg['default_client'] not in CLIENTS:

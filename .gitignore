@@ -1,4 +1,5 @@
 config.yaml
+config.yaml.*.bak
 .venv/
 __pycache__/
 gempy.log

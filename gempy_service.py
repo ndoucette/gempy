@@ -79,13 +79,16 @@ def owns_listener(pid, port, rows=None):
         and r['inode'] not in inodes for r in rows)
 
 
-def start_backend(lich_bin, character, port, realm_flags=(), active_session_dir=None):
+def start_backend(lich_bin, character, port, realm_flags=(), active_session_dir=None, checkin_context=None):
     cmd = ['ruby', os.path.abspath(lich_bin), '--login', character,
            f'--detachable-client={port}', '--without-frontend', *realm_flags]
     if active_session_dir:
         cmd.append(f'--active-session-dir={active_session_dir}')
+    options = {}
+    if checkin_context is not None:
+        options['env'] = dict(os.environ, GEMPY_CHECKIN_CONTEXT=json.dumps(checkin_context))
     return subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL, start_new_session=True)
+                            stderr=subprocess.DEVNULL, start_new_session=True, **options)
 
 
 class Service:
@@ -314,6 +317,39 @@ class Service:
         raise ServiceError('The client was started but no new attachment was detected. Check its window on the Gempy host before retrying.')
 
     def ensure_backend(self, character, realm):
+        return self._account_backend(character, realm)
+
+    def start_checkin(self, character, realm, job_id, context):
+        if self.config.get('daily_checkin', {}).get('allow_live_operations') is not True:
+            raise ServiceError('Live check-ins are disabled.')
+        return self._account_backend(character, realm, job_id, context)
+
+    def _account_backend(self, character, realm, job_id=None, context=None):
+        from account_guard import account_for, host_lock, reservation
+        try:
+            account = account_for(self.config, character)
+        except (ValueError, AttributeError):
+            raise ServiceError('Unknown or ambiguous account membership.') from None
+        with host_lock(self.state, 'account:' + account):
+            owner = reservation(self.state, account)
+            if owner and owner != job_id:
+                raise ServiceError('This account is reserved by Daily Check-in. Finish or take over its session first.')
+            if job_id and owner != job_id:
+                raise ServiceError('Check-in account reservation is missing.')
+            for session in self._discover():
+                try:
+                    same = account_for(self.config, session['character']) == account
+                except ValueError:
+                    if job_id:
+                        raise ServiceError('An unmapped session is running; check-in deferred.') from None
+                    continue
+                if same:
+                    if not job_id and session['character'].casefold() == character.casefold() and session['realm'] == realm:
+                        return session
+                    raise ServiceError('Another character is already running on this account.')
+            return self._ensure_backend(character, realm, context)
+
+    def _ensure_backend(self, character, realm, checkin_context=None):
         configured = [c for chars in self.config.get('accounts', {}).values() for c in chars]
         if character not in configured or realm not in ('prime', 'test'):
             raise ServiceError('Unknown configured character or realm.')
@@ -326,7 +362,8 @@ class Service:
                 flags = self.config.get('realms', {}).get(realm, DEFAULT_REALM_FLAGS[realm])
                 if isinstance(flags, str):
                     flags = flags.split()
-                child = start_backend(self.lich, character, port, flags, self.active_dir)
+                child = (start_backend(self.lich, character, port, flags, self.active_dir, checkin_context)
+                         if checkin_context is not None else start_backend(self.lich, character, port, flags, self.active_dir))
                 self._track(child)
                 deadline = time.monotonic() + 120
                 while time.monotonic() < deadline:
@@ -415,6 +452,13 @@ class Service:
         self._check_client(client)
         with self._lock(session_id):
             p = self._validated(session_id)
+            from account_guard import account_for, reservation
+            try:
+                account = account_for(self.config, p['character'])
+            except ValueError:
+                account = None
+            if account and reservation(self.state, account):
+                raise ServiceError('Use Daily Check-in to take over this session before attaching a client.')
             if client == 'connection':
                 return {'session_id': session_id, 'connection': connection_details(p['character'], p['port'])}
             if client in ('vellum_gui', 'vellum_tui', 'saga'):
@@ -472,10 +516,18 @@ class Service:
             return {'session_id': session_id, 'web_port': entry['port'],
                     'pairing_path': ('/play' if client == 'vellum_web' else '/despana') + '#token=' + quote(self._token(entry), safe='')}
 
-    def disconnect(self, session_id, force=False):
+    def disconnect_checkin(self, session_id):
+        with self._lock(session_id):
+            if self._validated(session_id).get('attachment') != 'Headless':
+                raise ServiceError('Client attached. Automatic cleanup suspended.')
+            return self.disconnect(session_id, headless_only=True)
+
+    def disconnect(self, session_id, force=False, headless_only=False):
         with self._lock(session_id):
             p = self._validated(session_id)
             entry = self._client_for(p)
+            if headless_only and (force or p['attachment'] != 'Headless' or entry):
+                raise ServiceError('Client state changed. Automatic cleanup suspended.')
             deadline = time.monotonic() + (10 if force else 70)
             if force:
                 # Revalidate immediately before signaling; pidfd closes PID-reuse race.
@@ -492,11 +544,19 @@ class Service:
             else:
                 if p['attachment'] == 'Attached' and not self._multi_client(p):
                     raise ServiceError('This Lich version cannot accept an additional client. Close the attached frontend and retry.')
-                self._validated(session_id)
+                current_session = self._validated(session_id)
+                if headless_only and current_session.get('attachment') != 'Headless':
+                    raise ServiceError('Client attached. Automatic cleanup suspended.')
                 try:
                     with socket.create_connection(('127.0.0.1', p['port']), timeout=3) as sock:
                         # Revalidate after connect before submitting the destructive command.
                         self._validated(session_id)
+                        if headless_only:
+                            rows, inodes = tcp_rows(), socket_inodes(p['pid'])
+                            client_port = sock.getsockname()[1]
+                            connections = None if rows is None or inodes is None else [r for r in rows if r['local']==p['port'] and r['state']=='01' and r['inode'] in inodes]
+                            if not connections or len(connections)!=1 or connections[0]['remote']!=client_port:
+                                raise ServiceError('Cannot confirm exclusive cleanup connection. Automatic logout suspended.')
                         sock.sendall(b'exit\n')
                         # Keep reading startup output until Lich consumes exit and closes.
                         sock.settimeout(0.5)

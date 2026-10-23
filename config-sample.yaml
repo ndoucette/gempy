@@ -1,5 +1,17 @@
 # config.yaml
 
+# Daily Check-in is inert until a supervised pilot explicitly enables this gate.
+# The schedule is separately configured on the Daily Check-in page, and defaults off.
+daily_checkin:
+  allow_live_operations: false
+  realm: prime
+  # 'ack': finite login scripts call GempyReporter.checkin_ready! after success.
+  # 'none': explicit opt-in ONLY for characters with no finite startup prerequisites.
+  startup_mode: ack
+  # Map account labels/aliases to a stable identity when labels may be renamed.
+  # Never place passwords here. All saved credentials remain in Lich.
+  account_ids: {}
+
 # Paths to the Lich and Profanity binaries
 paths:
   lich_bin: '/your/path/to/Lich5/lich5/lich.rbw'

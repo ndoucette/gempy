@@ -3,7 +3,7 @@ import json
 import math
 import time
 
-SECTIONS = ('character', 'stats', 'skills', 'bonuses', 'resources')
+SECTIONS = ('character', 'stats', 'skills', 'bonuses', 'resources', 'wealth')
 
 
 def validate_profile(data):
@@ -36,7 +36,8 @@ def validate_profile(data):
                 numeric(entry.get(key), f'{section}.{name}.{key}', signed=section == 'stats')
             if 'category' in entry and entry['category'] not in ('skill', 'spell_research'):
                 raise ValueError('Unknown skill category')
-    for section, keys in [('resources', ('weekly', 'total', 'max_weekly', 'max_total', 'observed_at')),
+    for section, keys in [('resources', ('weekly', 'total', 'max_weekly', 'max_total', 'observed_at', 'suffused', 'suffused_observed_at')),
+                          ('wealth', ('bank_balance', 'deeds', 'bank_balance_observed_at', 'deeds_observed_at', 'observed_at')),
                           ('bonuses', ('lumnis_points_remaining', 'lumnis_donations', 'lumnis_reset_at',
                                        'observed_at', 'donations_observed_at', 'fashlonae_days_remaining',
                                        'fashlonae_observed_at', 'fashlonae_days_observed_at'))]:
@@ -101,6 +102,8 @@ class ProfileRepository:
                 if value is None or key.endswith('observed_at') or key == 'observed_at':
                     continue
                 stamp = (incoming.get('donations_observed_at') or observed) if section == 'bonuses' and key == 'lumnis_donations' else observed
+                if section == 'wealth' or (section == 'resources' and key == 'suffused'):
+                    stamp = incoming.get(key + '_observed_at') or observed
                 if section == 'bonuses' and key.startswith('fashlonae_'):
                     stamp = incoming.get('fashlonae_days_observed_at' if key == 'fashlonae_days_remaining' else 'fashlonae_observed_at') or observed
                 stamp = min(stamp, received)

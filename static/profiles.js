@@ -37,12 +37,26 @@ const characterProfiles = (() => {
       node.append(text('span','Updated '+ageText(observed),'observation-age'));
   }
 
+  function resourceView(data,profile,now=Date.now()/1000) {
+    const resource=data.resources||{},bonuses=data.bonuses||{};
+    const reset=bonuses.lumnis_reset_at;
+    const stageObserved=Math.max(profile?.field_observed_at?.bonuses?.lumnis_stage||0,bonuses.observed_at||0);
+    const ready=bonuses.lumnis_stage!=='unavailable'&&(bonuses.lumnis_stage==='ready'||
+      (Number.isFinite(reset)&&reset>0&&reset<=now&&stageObserved<reset));
+    // Display the new cycle while the game waits for its first XP gain. Never
+    // overwrite durable observations or invent an unreported resource counter.
+    return ready&&Number.isFinite(resource.weekly)&&resource.weekly>=0
+      ? {...resource,weekly:0,weekly_reset_pending:true}:resource;
+  }
+
   function resourceNumbers(resource,parent,showLimits=false) {
     if(resource.weekly==null&&resource.total==null) {parent.append(text('p','Not reported','monitor-empty'));return;}
     const values=text('dl','','resource-values');
     for(const [name,field,cls] of [['Weekly','weekly','resource-weekly'],['Stored','total','resource-stored']]) {
       const amount=number(resource[field])+(showLimits?' / '+number(field==='weekly'?50000:200000):'');
-      const item=text('div');item.append(text('dt',name),text('dd',amount,cls));values.append(item);
+      const item=text('div'),value=text('dd',amount,cls);
+      if(field==='weekly'&&resource.weekly_reset_pending)value.title='Lumnis is ready. Weekly earnings reset on the next XP gain; showing 0 for the new cycle.';
+      item.append(text('dt',name),value);values.append(item);
     }
     parent.append(values);
   }
@@ -146,7 +160,7 @@ const characterProfiles = (() => {
   }
   function balanceSummary(data, parent, open, profile, offline=false) {
     const summary = text('div', '', 'profile-summary roster-summary');
-    const bonuses = data.bonuses || {}, resource = data.resources || {};
+    const bonuses = data.bonuses || {}, resource = resourceView(data,profile);
     const cycle=text('div','','roster-cycle');cycleCard(bonuses,cycle);
     tutelageSummary(bonuses,cycle,profile,offline);
     const balances=text('div','','roster-balances');balances.append(text('div',resource.type||'Resources','resource-name'));resourceNumbers(resource,balances);
@@ -190,7 +204,7 @@ const characterProfiles = (() => {
   }
 
   function resourceSection(data, profile, parent) {
-    const resource = data.resources || {};
+    const resource = resourceView(data,profile);
     const section = inspectorSection(resource.type || 'Profession resources', parent);
     section.classList.add('profile-resource-card');
     resourceNumbers(resource,section);
@@ -316,7 +330,7 @@ const characterProfiles = (() => {
       const identity=[data.character?.level!=null?'Level '+number(data.character.level):'',data.character?.profession].filter(Boolean).join(' · ');
       if(identity)info.append(text('div',identity,'character-meta'));
       if(profile?.updated_at) {
-        const resource=data.resources||{},summary=text('p','','roster-quick-balances');
+        const resource=resourceView(data,profile),summary=text('p','','roster-quick-balances');
         summary.append(text('span',resource.type||'Resources'),
           text('span','Weekly '+number(resource.weekly)),text('span','Stored '+number(resource.total)));
         info.append(summary);
@@ -389,7 +403,7 @@ const characterProfiles = (() => {
       rates.title='Normal and ascension XP combined. Session average starts when the reporter starts (normally at login). Past 60 minutes uses XP recorded so far during the first hour.';
       rates.append(rateValues);identity.append(rates);
       const resources=text('div','','row-resources');resources.setAttribute('aria-label','Resources for '+session.character);
-      resources.append(text('div',data.resources?.type||'Resources','resource-name'));resourceNumbers(data.resources||{},resources,true);
+      resources.append(text('div',data.resources?.type||'Resources','resource-name'));resourceNumbers(resourceView(data,saved),resources,true);
       observation(resources,live.resources?.observed_at||saved?.observed_at?.resources,session);
       identity.append(resources);
       row.replaceChildren(identity,vitals);
@@ -436,7 +450,7 @@ const characterProfiles = (() => {
     return sessions.find(s=>s.realm===gameRealm&&s.character.toLowerCase()===name.toLowerCase())||
       {id:'profile:'+gameRealm+':'+name,character:name,realm:gameRealm,running:false,attachment:'Offline',telemetry:{status:'unavailable'}};
   }
-  return {choices,sessionFor,tutelageState,
+  return {choices,sessionFor,tutelageState,resourceView,
     get skillQuery(){return skillQuery;},set skillQuery(value){skillQuery=value;},
     get showUntrained(){return showUntrained;},set showUntrained(value){showUntrained=value;}};
 })();

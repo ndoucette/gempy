@@ -1,0 +1,125 @@
+<div id="gempy-checkin-preview" aria-label="GemPy Daily Check-in design preview">
+  <style>
+    #gempy-checkin-preview{--gp-bg:light-dark(#f7f7f5,#111315);--gp-panel:light-dark(#ffffff,#181b1e);--gp-side:light-dark(#eeefeb,#151719);--gp-text:light-dark(#242a29,#e7e9e8);--gp-muted:light-dark(#626b6b,#a2abae);--gp-line:light-dark(#d9ddda,#30363a);--gp-gold:light-dark(#866328,#d5b77d);--gp-gold-fill:light-dark(#f2e7d1,#302c22);--gp-green:light-dark(#316646,#91b69d);--gp-blue:light-dark(#336b91,#9bbbd3);--gp-warn:light-dark(#88532b,#d9ad7d);--gp-track:light-dark(#e2e5e1,#2b3135);font:13px/1.5 Inter,ui-sans-serif,system-ui,sans-serif;color:var(--gp-text);background:var(--gp-bg);border-radius:10px;overflow:hidden}
+    #gempy-checkin-preview *{box-sizing:border-box}
+    #gempy-checkin-preview button,#gempy-checkin-preview select{font:inherit;color:inherit}
+    #gempy-checkin-preview button:focus-visible,#gempy-checkin-preview select:focus-visible{outline:2px solid var(--gp-gold);outline-offset:3px}
+    #gempy-checkin-preview button{cursor:pointer}
+    #gempy-checkin-preview .gp-shell{display:grid;grid-template-columns:148px minmax(0,1fr)}
+    #gempy-checkin-preview .gp-sidebar{background:var(--gp-side);padding:25px 12px;border-right:1px solid var(--gp-line)}
+    #gempy-checkin-preview .gp-brand{letter-spacing:2px;font-size:17px;font-weight:600;padding:0 10px 28px;color:var(--gp-gold)}
+    #gempy-checkin-preview .gp-brand small{display:block;font-size:9px;letter-spacing:1px;color:var(--gp-muted);font-weight:400;margin-top:5px}
+    #gempy-checkin-preview .gp-nav{display:flex;flex-direction:column;gap:5px}
+    #gempy-checkin-preview .gp-nav span{padding:9px 10px;display:flex;align-items:center;gap:9px;color:var(--gp-muted);font-size:12px;border-radius:5px}
+    #gempy-checkin-preview .gp-nav .gp-selected{background:var(--gp-gold-fill);color:var(--gp-gold)}
+    #gempy-checkin-preview i{width:16px;height:16px;display:inline-block}
+    #gempy-checkin-preview .gp-main{min-width:0;padding:0 24px 24px}
+    #gempy-checkin-preview .gp-top{display:flex;gap:10px;align-items:center;min-height:65px;border-bottom:1px solid var(--gp-line);font-size:11px;color:var(--gp-muted);padding-right:90px}
+    #gempy-checkin-preview .gp-top strong{color:var(--gp-text);font-weight:500}
+    #gempy-checkin-preview .gp-heading{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin:24px 0 20px}
+    #gempy-checkin-preview h2{font-size:25px;line-height:1.2;font-weight:550;letter-spacing:-.6px;margin:0 0 7px}
+    #gempy-checkin-preview p{margin:0;color:var(--gp-muted);font-size:12px}
+    #gempy-checkin-preview .gp-actions{display:flex;gap:8px;flex-wrap:wrap}
+    #gempy-checkin-preview .gp-button{border:1px solid var(--gp-line);background:var(--gp-panel);border-radius:5px;padding:7px 11px;display:inline-flex;gap:7px;align-items:center;min-height:34px;font-size:12px}
+    #gempy-checkin-preview .gp-button.gp-primary{background:var(--gp-gold);color:light-dark(#fff,#24221d);border-color:var(--gp-gold)}
+    #gempy-checkin-preview .gp-summary{background:var(--gp-panel);padding:19px 20px;border:1px solid var(--gp-line);border-radius:7px}
+    #gempy-checkin-preview .gp-run-line{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+    #gempy-checkin-preview .gp-run-label{display:flex;align-items:center;gap:8px;font-weight:500}
+    #gempy-checkin-preview .gp-live{width:6px;height:6px;border-radius:50%;background:var(--gp-green)}
+    #gempy-checkin-preview .gp-small{font-size:11px;color:var(--gp-muted)}
+    #gempy-checkin-preview .gp-progress-label{display:flex;align-items:baseline;gap:8px;margin-top:12px}
+    #gempy-checkin-preview .gp-progress-label strong{font-size:27px;font-weight:500;letter-spacing:-.6px;font-variant-numeric:tabular-nums}
+    #gempy-checkin-preview .gp-track{height:7px;background:var(--gp-track);border-radius:8px;overflow:hidden;margin:10px 0 13px}
+    #gempy-checkin-preview .gp-track span{display:block;height:100%;width:66.666%;background:var(--gp-green)}
+    #gempy-checkin-preview .gp-counts{display:flex;gap:17px;flex-wrap:wrap;font-size:11px;color:var(--gp-muted)}
+    #gempy-checkin-preview .gp-counts b{color:var(--gp-text);font-weight:500}
+    #gempy-checkin-preview .gp-workspace{display:grid;grid-template-columns:minmax(0,1fr) 235px;gap:22px;margin-top:25px}
+    #gempy-checkin-preview h3{font-size:13px;font-weight:550;margin:0}
+    #gempy-checkin-preview .gp-section-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+    #gempy-checkin-preview .gp-lane{display:block;width:100%;text-align:left;border:0;border-top:1px solid var(--gp-line);border-radius:0;background:transparent;padding:13px 8px;color:var(--gp-text)}
+    #gempy-checkin-preview .gp-lane[aria-pressed=true]{background:var(--gp-gold-fill);box-shadow:inset 2px 0 var(--gp-gold)}
+    #gempy-checkin-preview .gp-lane-top{display:flex;justify-content:space-between;gap:10px;margin-bottom:5px;font-size:12px}
+    #gempy-checkin-preview .gp-lane-top b{font-weight:550}
+    #gempy-checkin-preview .gp-lane-bottom{display:flex;align-items:center;gap:9px;justify-content:space-between;color:var(--gp-muted);font-size:11px}
+    #gempy-checkin-preview .gp-stage{color:var(--gp-blue)}
+    #gempy-checkin-preview .gp-wait{color:var(--gp-warn)}
+    #gempy-checkin-preview .gp-done{color:var(--gp-green)}
+    #gempy-checkin-preview .gp-steps{display:flex;gap:4px;flex-shrink:0}
+    #gempy-checkin-preview .gp-step{display:inline-block;width:17px;height:5px;background:var(--gp-track);border-radius:2px}
+    #gempy-checkin-preview .gp-step.done{background:var(--gp-green)}
+    #gempy-checkin-preview .gp-step.active{background:var(--gp-gold)}
+    #gempy-checkin-preview .gp-detail{border-left:1px solid var(--gp-line);padding-left:20px;min-width:0}
+    #gempy-checkin-preview .gp-detail-title{font-size:17px;letter-spacing:-.2px;margin:3px 0 0;font-weight:550}
+    #gempy-checkin-preview .gp-subtitle{font-size:11px;color:var(--gp-muted);margin:3px 0 19px}
+    #gempy-checkin-preview .gp-timeline{list-style:none;padding:0;margin:0}
+    #gempy-checkin-preview .gp-timeline li{display:grid;grid-template-columns:18px minmax(0,1fr);gap:7px;padding-bottom:16px;font-size:12px}
+    #gempy-checkin-preview .gp-timeline small{display:block;font-size:11px;color:var(--gp-muted);margin-top:3px}
+    #gempy-checkin-preview .gp-status-mark{font-size:13px;color:var(--gp-green)}
+    #gempy-checkin-preview .gp-status-mark.pending{color:var(--gp-muted)}
+    #gempy-checkin-preview .gp-note{border-top:1px solid var(--gp-line);padding-top:12px;font-size:11px;color:var(--gp-muted)}
+    #gempy-checkin-preview .gp-note b{display:block;font-weight:500;color:var(--gp-warn);margin-bottom:4px}
+    #gempy-checkin-preview .gp-footer{border-top:1px solid var(--gp-line);margin-top:20px;padding-top:15px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+    #gempy-checkin-preview .gp-footer details{font-size:11px;color:var(--gp-muted);width:100%}
+    #gempy-checkin-preview .gp-footer summary{cursor:pointer;color:var(--gp-text);padding:4px 0}
+    #gempy-checkin-preview .gp-policy{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px}
+    #gempy-checkin-preview .gp-policy label{display:flex;flex-direction:column;gap:5px}
+    #gempy-checkin-preview select{padding:6px;background:var(--gp-panel);border:1px solid var(--gp-line);border-radius:4px}
+    #gempy-checkin-preview .gp-notice{margin-top:12px;font-size:11px;color:var(--gp-gold)}
+    #gempy-checkin-preview .gp-preview-label{font-size:10px;letter-spacing:.3px;color:var(--gp-muted)}
+    @media(max-width:850px){#gempy-checkin-preview .gp-shell{grid-template-columns:115px minmax(0,1fr)}#gempy-checkin-preview .gp-sidebar{padding:25px 7px}#gempy-checkin-preview .gp-nav span{padding:9px 6px;font-size:11px;gap:6px}#gempy-checkin-preview .gp-main{padding:0 17px 20px}#gempy-checkin-preview .gp-workspace{grid-template-columns:minmax(0,1fr) 208px;gap:16px}#gempy-checkin-preview .gp-detail{padding-left:16px}}
+    @media(max-width:650px){#gempy-checkin-preview .gp-shell{display:block}#gempy-checkin-preview .gp-sidebar{border-right:0;border-bottom:1px solid var(--gp-line);padding:12px 15px}#gempy-checkin-preview .gp-brand{padding:0 0 8px;font-size:14px}#gempy-checkin-preview .gp-brand small{display:none}#gempy-checkin-preview .gp-nav{flex-direction:row;flex-wrap:wrap;gap:0}#gempy-checkin-preview .gp-nav span{padding:6px 8px}#gempy-checkin-preview .gp-nav i{display:none}#gempy-checkin-preview .gp-top{min-height:45px;padding-right:0}#gempy-checkin-preview .gp-workspace{grid-template-columns:1fr}#gempy-checkin-preview .gp-detail{padding:17px 0 0;border-left:0;border-top:1px solid var(--gp-line)}#gempy-checkin-preview .gp-heading{margin:18px 0}#gempy-checkin-preview .gp-summary{padding:14px}#gempy-checkin-preview .gp-lane{padding:14px 8px}#gempy-checkin-preview .gp-actions button{min-height:40px}}
+  </style>
+  <div class="gp-shell">
+    <aside class="gp-sidebar" aria-label="Application navigation preview">
+      <div class="gp-brand">GEMPY<small>CHARACTER WORKSPACE</small></div>
+      <nav class="gp-nav"><span><i data-lucide="activity" aria-hidden="true"></i>Live</span><span><i data-lucide="chart-no-axes-combined" aria-hidden="true"></i>Progress</span><span><i data-lucide="list" aria-hidden="true"></i>Status</span><span><i data-lucide="users" aria-hidden="true"></i>Characters</span><span class="gp-selected" aria-current="page"><i data-lucide="calendar-check" aria-hidden="true"></i>Daily Check-in</span><span><i data-lucide="repeat-2" aria-hidden="true"></i>Rotation</span><span><i data-lucide="settings-2" aria-hidden="true"></i>Settings</span></nav>
+    </aside>
+    <main class="gp-main">
+      <div class="gp-top">Workspace <span> / </span><strong>Daily Check-in</strong></div>
+      <header class="gp-heading"><div><h2>Daily Check-in</h2><p>Keep every character current.</p></div><div class="gp-actions"><button type="button" class="gp-button gp-primary" id="gp-pause">Pause queue</button><button type="button" class="gp-button" id="gp-stop">Stop run</button></div></header>
+      <section class="gp-summary" aria-label="Current check-in run">
+        <div class="gp-run-line"><span class="gp-run-label"><span class="gp-live"></span><span id="gp-run-state">Daily sweep running</span></span><span class="gp-small">Game day: Oct 23 · Eastern</span></div>
+        <div class="gp-progress-label"><strong>16 / 24</strong><span class="gp-small">characters complete</span></div>
+        <div class="gp-track" role="progressbar" aria-label="Characters complete" aria-valuenow="16" aria-valuemin="0" aria-valuemax="24"><span></span></div>
+        <div class="gp-counts"><span><b>3</b> working</span><span><b>1</b> waiting for account</span><span><b>4</b> queued</span><span>Elapsed <b>04:18</b></span></div>
+        <div class="gp-notice" id="gp-notice" role="status" hidden></div>
+      </section>
+      <div class="gp-workspace">
+        <section aria-label="Account queues"><div class="gp-section-heading"><h3>Account queues</h3><span class="gp-small" id="gp-concurrency">3 of 4 slots active</span></div><div id="gp-lanes"></div><p class="gp-small" style="margin:10px 8px 0">Select an account to inspect its current step.</p></section>
+        <section class="gp-detail" id="gp-detail" aria-label="Selected character details" aria-live="polite"></section>
+      </div>
+      <footer class="gp-footer"><span class="gp-small">Daily at 12:15 AM ET · Freshness catch-up at 22h</span><span class="gp-preview-label">DESIGN PREVIEW · SAMPLE DATA</span><details><summary>Schedule &amp; behavior</summary><div class="gp-policy"><label>Parallel accounts<select id="gp-limit"><option>2</option><option selected>4</option><option>6</option></select></label><label>Occupied accounts<select><option>Wait until available</option></select></label><label>Data refresh<select><option>Before 24 hours old</option></select></label></div><p style="margin-top:10px">Existing play sessions stay connected. Each account runs one character at a time.</p></details></footer>
+    </main>
+  </div>
+  <script>
+  (()=>{
+    const root=document.getElementById('gempy-checkin-preview');
+    const accounts=[
+      {name:'Account A',done:3,char:'Renwaldo',stage:'Running login scripts',status:'active',phase:1,next:'Last character on this account',steps:[['Logged in','Daily login observed · reward day 18'],['Startup scripts','Waiting for startup-complete acknowledgment'],['Capture data','Waiting for startup scripts'],['Save & log out','Pending']]},
+      {name:'Account B',done:3,char:'Voxy',stage:'Logging out',status:'active',phase:3,next:'Last character on this account',steps:[['Logged in','Reward confirmation received · day 24'],['Startup scripts','Required scripts finished'],['Capture saved','Required fields committed · 8 seconds ago'],['Log out','Exit sent · waiting for session to close']]},
+      {name:'Account C',done:2,char:'Vecto',stage:'Capturing character data',status:'active',phase:2,next:'Next: Gringott',steps:[['Logged in','Reward confirmation received · day 12'],['Startup scripts','Required scripts finished'],['Capture data','Lumnis, XP, stats & skills saved · resource check pending'],['Save & log out','Waiting for capture acknowledgment']]},
+      {name:'Account D',done:3,char:'Dartwen',stage:'Waiting · Dartwen is playing',status:'wait',phase:-1,next:'Queued: one alternate character',steps:[['Account occupied','Dartwen is in an existing play session'],['Current character','Today’s presence and required data already recorded'],['Remaining character','Deferred until this account is available'],['Next check','On session change or within 60 seconds']]},
+      {name:'Account E',done:4,char:'Cragstone',stage:'All four characters complete',status:'done',phase:4,next:'Last completed: Cragstone',steps:[['Logged in','Today’s credit recorded for all four characters'],['Startup scripts','All required scripts finished'],['Capture saved','Required observations committed'],['Logged out','All run-owned sessions closed']]},
+      {name:'Account F',done:1,char:'Vlatimire',stage:'Queued · next account to start',status:'queued',phase:-1,next:'Three characters remaining',steps:[['Queued','Vlatimire is next on this account'],['Log in','Waiting for dispatch'],['Capture data','Will follow startup completion'],['Save & log out','Pending']]}
+    ];
+    let selected=2,paused=false,stopped=false;
+    const saved=window.openai?.widgetState?.privateContent;
+    if(saved && Number.isInteger(saved.selected) && saved.selected>=0 && saved.selected<accounts.length)selected=saved.selected;
+    const save=()=>{if(window.openai?.setWidgetState)window.openai.setWidgetState({modelContent:{design:'Daily Check-in account lanes',selectedAccount:accounts[selected].name},privateContent:{selected}}).catch(()=>{});};
+    function renderDetails(){
+      const a=accounts[selected];
+      root.querySelectorAll('.gp-lane').forEach((b,i)=>b.setAttribute('aria-pressed',String(i===selected)));
+      const icon=(i)=>a.status==='done'||(a.status==='active'&&i<a.phase)?'✓':a.status==='active'&&i===a.phase?'◉':'○';
+      root.querySelector('#gp-detail').innerHTML='<div class="gp-small">'+a.name+' · '+a.done+' of 4 complete</div><div class="gp-detail-title">'+a.char+'</div><div class="gp-subtitle">'+a.next+'</div><ol class="gp-timeline">'+a.steps.map((s,i)=>'<li><span class="gp-status-mark '+(icon(i)==='○'?'pending':'')+'" aria-hidden="true">'+icon(i)+'</span><div>'+s[0]+'<small>'+s[1]+'</small></div></li>').join('')+'</ol>'+(selected===2?'<div class="gp-note"><b>Optional data gap</b>Bank balance: 2 days old. Character is not at a bank; no runner boost will be used.</div>':selected===3?'<div class="gp-note"><b>Play session preserved</b>The sweep will not disconnect Dartwen. Other accounts continue.</div>':'<div class="gp-note">Login credit, data capture and logout are tracked separately.</div>');
+    }
+    root.querySelector('#gp-lanes').innerHTML=accounts.map((a,i)=>'<button type="button" class="gp-lane" data-account="'+i+'" aria-pressed="'+(i===selected)+'"><span class="gp-lane-top"><b>'+a.name+'</b><span class="gp-small">'+a.done+' / 4</span></span><span class="gp-lane-bottom"><span><span class="'+(a.status==='wait'?'gp-wait':a.status==='done'?'gp-done':'gp-stage')+'">'+a.stage+'</span>'+(a.status==='active'?'<br>'+a.char:'')+'</span><span class="gp-steps" aria-hidden="true">'+[0,1,2,3].map(n=>'<span class="gp-step '+(n<a.done?'done':n===a.done&&a.status==='active'?'active':'')+'"></span>').join('')+'</span></span></button>').join('');
+    root.querySelectorAll('.gp-lane').forEach(b=>b.addEventListener('click',()=>{selected=Number(b.dataset.account);renderDetails();save();}));
+    root.querySelector('#gp-pause').addEventListener('click',()=>{if(stopped)return;paused=!paused;root.querySelector('#gp-pause').textContent=paused?'Resume queue':'Pause queue';root.querySelector('#gp-run-state').textContent=paused?'Queue paused · current work finishing':'Daily sweep running';const notice=root.querySelector('#gp-notice');notice.hidden=!paused;notice.textContent='No new logins. The three active characters will finish capture and log out.';});
+    root.querySelector('#gp-stop').addEventListener('click',()=>{stopped=true;root.querySelector('#gp-run-state').textContent='Stopping · waiting for safe cleanup';root.querySelector('#gp-stop').disabled=true;root.querySelector('#gp-pause').disabled=true;const notice=root.querySelector('#gp-notice');notice.hidden=false;notice.textContent='Pending logins cancelled. Run-owned sessions finish bounded cleanup; existing play sessions stay connected.';});
+    root.querySelector('#gp-limit').addEventListener('change',e=>{root.querySelector('#gp-concurrency').textContent='3 active · limit '+e.target.value+(Number(e.target.value)<3?' after current work':'');});
+    window.addEventListener('openai:set_globals',e=>{const v=e.detail?.globals?.widgetState?.privateContent?.selected;if(Number.isInteger(v)&&v>=0&&v<accounts.length){selected=v;renderDetails();}});
+    renderDetails();
+    if(globalThis.Tweak){const options={density:'Comfortable'};const tweaks=new Tweak({container:root,onChange:()=>{root.querySelectorAll('.gp-lane').forEach(el=>el.style.padding=options.density==='Compact'?'9px 8px':'13px 8px');}});tweaks.addSelect(options,'density',{label:'Account row density',options:['Comfortable','Compact']});}
+  })();
+  </script>
+</div>

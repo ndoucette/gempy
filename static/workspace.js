@@ -1,5 +1,70 @@
+/* Invoker schedule from invokerhours.lic v1.2: Eastern arrivals, 15-minute visits.
+ * Use the actual Eastern UTC offset so DST transitions work in any client timezone.
+ * This is a scheduled countdown, not an observation of the NPC's presence.
+ */
+const invokerCountdown = (() => {
+  const eastern = new Intl.DateTimeFormat('en-US', {
+    timeZone:'America/New_York', year:'numeric', month:'numeric', day:'numeric',
+    hour:'numeric', hourCycle:'h23'
+  });
+  const standard = [0,2,4,8,12,16,18,20,22];
+  const daylight = [0,2,4,6,10,14,18,20,22];
+  const pacific = new Intl.DateTimeFormat('en-US', {
+    timeZone:'America/Los_Angeles',hour:'numeric',minute:'2-digit',timeZoneName:'short'
+  });
+  const arrival = timestamp => pacific.format(timestamp);
+  let cachedHour, arrivals;
+  function state(now=Date.now()) {
+    const hour = Math.floor(now/3600000)*3600000;
+    if(hour!==cachedHour) {
+      arrivals=[];
+      for(let candidate=hour;candidate<=hour+26*3600000;candidate+=3600000) {
+        const parts=Object.fromEntries(eastern.formatToParts(candidate).map(p=>[p.type,p.value]));
+        const offset=Date.UTC(+parts.year,+parts.month-1,+parts.day,+parts.hour)-candidate;
+        if((offset===-4*3600000?daylight:standard).includes(+parts.hour))arrivals.push(candidate);
+      }
+      cachedHour=hour;
+    }
+    const current=arrivals.find(start=>start<=now&&now<start+900000);
+    const nextAt=arrivals.find(start=>start>now);
+    return {remaining:current===undefined?0:Math.ceil((current+900000-now)/1000),
+      nextIn:Math.ceil((nextAt-now)/1000),nextAt};
+  }
+  function duration(seconds,short=false) {
+    const parts=[Math.floor(seconds/3600),Math.floor(seconds/60)%60,seconds%60];
+    return (short?parts.slice(1):parts).map(n=>String(n).padStart(2,'0')).join(':');
+  }
+  return {state,duration,arrival};
+})();
+if(typeof module!=='undefined'&&module.exports)module.exports=invokerCountdown;
+
 /* Navigation state and entry points shared by the existing task views. */
 (() => {
+  if(typeof document==='undefined')return;
+  const invoker=text('div','','invoker-countdown');
+  invoker.id='invokerCountdown';
+  invoker.setAttribute('role','timer');
+  invoker.setAttribute('aria-live','off');
+  invoker.title='Scheduled visits at the Landing Small Park: 15 minutes. Arrival times shown in Pacific time (PST/PDT), converted from invokerhours.lic.';
+  const invokerLive=text('span','','invoker-live');
+  const invokerNext=text('span','','invoker-next');
+  invoker.append(text('span','✦','invoker-spark'),text('span','Invoker','invoker-name'),invokerLive,invokerNext);
+  invoker.firstChild.setAttribute('aria-hidden','true');
+  $('clientToolbar').before(invoker);
+  function updateInvoker() {
+    invoker.hidden=!active||currentView!=='sessions';
+    if(invoker.hidden)return;
+    const timing=invokerCountdown.state();
+    invoker.dataset.live=String(timing.remaining>0);
+    invokerLive.hidden=!timing.remaining;
+    invokerLive.textContent=timing.remaining?'LIVE · '+invokerCountdown.duration(timing.remaining,true)+' left':'';
+    invokerNext.textContent='Next '+invokerCountdown.arrival(timing.nextAt)+' · '+invokerCountdown.duration(timing.nextIn);
+    invoker.setAttribute('aria-label','Invoker. '+(timing.remaining?'Live, '+timing.remaining+' seconds remaining. ':'')+
+      'Next scheduled visit at '+invokerCountdown.arrival(timing.nextAt)+', in '+timing.nextIn+' seconds.');
+  }
+  updateInvoker();
+  setInterval(updateInvoker,1000);
+  document.addEventListener('visibilitychange',updateInvoker);
   const sidebar=document.querySelector('.sidebar');
   let sidebarCollapsed=false;
   try{sidebarCollapsed=localStorage.getItem('gempy.sidebarCollapsed')==='true';}catch{}
@@ -18,9 +83,9 @@
     sidebarToggle.setAttribute('aria-expanded',String(!sidebarCollapsed));
     sidebarToggle.title=label;
   }
-  for(const [id,label] of [['sessionsTab','Live'],['rotationTab','Rotation'],['progressTab','Progress'],['charactersTab','Characters'],['settingsTab','Settings'],['logout','Log out']])$(id).title=label;
+  for(const [id,label] of [['sessionsTab','Live'],['statusTab','Status'],['checkinTab','Daily Check-in'],['rotationTab','Rotation'],['progressTab','Progress'],['charactersTab','Characters'],['settingsTab','Settings'],['logout','Log out']]){const tab=$(id);if(tab)tab.title=label;}
   renderSidebar();
-  const views=new Set(['sessions','rotation','progress','characters','settings']);
+  const views=new Set(['sessions','status','checkin','rotation','progress','characters','settings']);
   const sections=new Set(['overview','stats','skills','history']);
   const periods=new Set(['day','week','month','year','custom']);
   const fields=['search','accountFilter',
@@ -142,7 +207,7 @@
     writeRoute(true);
   }
   const originalTab=setTab;
-  setTab=function(tab){originalTab(tab);writeRoute();};
+  setTab=function(tab){originalTab(tab);updateInvoker();writeRoute();};
   const originalShow=showDetails;
   showDetails=function(session,section='overview') {
     if(!$('characterDetails').open){
