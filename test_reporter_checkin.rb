@@ -59,3 +59,43 @@ GempyReporter.instance_variable_set(:@checkin_request,nil)
 GempyReporter.accept_checkin_response(request)
 assert(GempyReporter.instance_variable_get(:@checkin_request).nil?, 'Existing user sessions ignore automation requests')
 puts 'Check-in reporter isolation, freshness, startup and reward checks passed'
+
+# BANK ACCOUNT is a read-only balance query, independent of bank.lic or room tags.
+Room.current = nil
+XMLData.room_title = '[Safe Haven, Great Room]'
+Lich::Util.fixture = { 'bank account' => [
+  'You currently have the following amounts on deposit:',
+  '  Wehnimer\'s Landing: 1,234',
+  '  Total: 1,234',
+  '<prompt time="4">'
+] }
+GempyReporter.instance_variable_set(:@checkin_context, {'capture_id'=>'a'*48,'startup_mode'=>'ack'})
+GempyReporter.instance_variable_set(:@checkin_request,nil)
+GempyReporter.accept_checkin_response(request)
+GempyReporter.instance_variable_set(:@checkin_index,6)
+GempyReporter.checkin_step
+bank_receipt=GempyReporter.collect
+assert(bank_receipt[:checkin][:fields]['bank'][:status]=='captured', 'BANK ACCOUNT must be sent outside bank-tagged rooms')
+assert(bank_receipt[:wealth][:bank_balance]==1234, 'Fresh bank total must accompany the capture')
+puts 'Remote read-only BANK ACCOUNT capture passed'
+
+# Liviloo's RESOURCE output contains vitals only before profession resources unlock.
+vitals = 'Health: 152/152     Mana: 131/131     Stamina: 66/66     Spirit: 8/9'
+def capture_resources(lines)
+  Lich::Util.fixture = {'resource' => lines}
+  GempyReporter.instance_variable_set(:@checkin_index, 3)
+  GempyReporter.instance_variable_get(:@checkin_receipt)[:phase] = 'capturing'
+  GempyReporter.checkin_step
+  GempyReporter.collect
+end
+empty = capture_resources([vitals, '<prompt time="5">'])
+assert(empty[:checkin][:fields]['resources'][:status] == 'captured', 'Completed vitals-only RESOURCE response counts as captured')
+assert(empty[:resources].values_at(:weekly, :total, :suffused) == [0, 0, 0], 'No profession resources means known zero, replacing old values')
+assert(empty[:resources][:observed_at] == empty[:checkin][:fields]['resources'][:observed_at], 'Zero resources have a fresh observation')
+gringott = capture_resources(['Health: 40/40     Mana: 0/0     Stamina: 59/59     Spirit: 7/7', '<prompt time="5">'])
+assert(gringott[:checkin][:fields]['resources'][:status] == 'captured' && gringott[:resources][:total] == 0, 'Gringott zero-mana vitals-only report is also captured as zero')
+[[], ['<prompt time="6">'], [vitals], [vitals, 'Essence: unreadable (Weekly)', '<prompt time="6">']].each do |lines|
+  result = capture_resources(lines)
+  assert(result[:checkin][:fields]['resources'][:status] == 'unavailable', 'Missing, truncated or malformed resource output must not count as zero')
+end
+puts 'Empty profession resources and incomplete-response checks passed'

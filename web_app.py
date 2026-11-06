@@ -62,6 +62,8 @@ def create_app(config, service=None, directory=None, session_seconds=SESSION_SEC
         credentials = json.loads((directory / 'auth.json').read_text())
     except FileNotFoundError:
         raise RuntimeError('Set the Gempy password first with ./run.sh --set-password') from None
+    from command_service import CommandService
+    commands = CommandService(service, directory)
     sessions, failures, operations = {}, {}, {}
     lock = threading.RLock()
     executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix='gempy-web')
@@ -71,12 +73,14 @@ def create_app(config, service=None, directory=None, session_seconds=SESSION_SEC
         checkin.start()
         yield
         checkin.close()
+        commands.close()
         executor.shutdown(wait=False, cancel_futures=True)
         telemetry.close()
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.telemetry = telemetry
     app.state.checkin = checkin
+    app.state.commands = commands
 
     def reporter_digest():
         try:
@@ -211,7 +215,7 @@ def create_app(config, service=None, directory=None, session_seconds=SESSION_SEC
 
     @app.get('/assets/{asset}')
     def workspace_asset(asset: str):
-        if asset not in ('workspace.js', 'comparison.js', 'workspace.css', 'status.js', 'status.css', 'checkin.js', 'checkin.css'):
+        if asset not in ('workspace.js', 'comparison.js', 'workspace.css', 'status.js', 'status.css', 'checkin.js', 'checkin.css', 'commands.js', 'commands.css', 'invoker-buffs.js', 'invoker-buffs.css'):
             raise HTTPException(404, 'Unknown asset.')
         return FileResponse(Path(__file__).parent / 'static' / asset,
                             media_type='text/css' if asset.endswith('.css') else 'text/javascript',
@@ -499,4 +503,6 @@ def create_app(config, service=None, directory=None, session_seconds=SESSION_SEC
 
     from checkin_api import register_checkin_routes
     register_checkin_routes(app, checkin, authenticated, json_body)
+    from command_api import register_command_routes
+    register_command_routes(app, commands, authenticated)
     return app

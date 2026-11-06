@@ -144,6 +144,29 @@ class CheckinCoordinator:
             self.db.execute('INSERT INTO checkin_events(run_id,job_id,at,phase,message) VALUES(?,?,?,?,?)',
                             (job['run_id'], job['id'], self.clock(), job['status'], job.get('message', '')))
 
+    def live_sessions(self):
+        """Current host sessions, independently of the selected run/history."""
+        sessions = self.service.sessions()
+        now = self.clock()
+        with self.lock:
+            jobs = [json.loads(r[0]) for r in self.db.execute('SELECT data FROM checkin_jobs ORDER BY rowid')]
+            phases = {j['session_id']: j['status'] for j in jobs if j.get('session_id') and
+                      (j['status'] in ACTIVE or (j['status']=='attention' and j.get('owned')))}
+            accounts = {r['character'].casefold(): r['account_label'] for r in self.roster()}
+        result = []
+        for session in sessions:
+            if session.get('running') is False:
+                continue
+            started = session.get('started_at')
+            if type(started) not in (int, float) or not math.isfinite(started) or started <= 0:
+                started = None
+            result.append(dict(id=session['id'], character=session.get('character','Unknown'),
+                realm=session.get('realm','unknown'),
+                account_label=accounts.get(session.get('character','').casefold(), 'Unmapped account'),
+                attachment=session.get('attachment','Unknown'), status=phases.get(session['id'],'online'),
+                started_at=started, elapsed_seconds=max(0,int(now-started)) if started is not None else None))
+        return sorted(result, key=lambda row: (row['account_label'].casefold(), row['character'].casefold(), row['id']))
+
     def snapshot(self, run_id=None):
         with self.lock:
             runs = self._runs()
@@ -172,9 +195,14 @@ class CheckinCoordinator:
                        status='running', mode=mode, trigger=trigger)
             realm = self.config.get('daily_checkin', {}).get('realm', 'prime')
             if realm not in ('prime', 'test'): raise CheckinError('Unsupported check-in realm.')
-            if self.config.get('daily_checkin', {}).get('startup_mode','ack') not in ('ack','none'):
-                raise CheckinError('Startup mode must be ack or none.')
+            if self.config.get('daily_checkin', {}).get('startup_mode','ack') not in ('ack','none','tracked'):
+                raise CheckinError('Startup mode must be ack, none, or tracked.')
             roster = self.roster()
+            pilot = self.config.get('daily_checkin', {}).get('pilot_characters')
+            if pilot is not None:
+                if not isinstance(pilot, list) or not pilot or any(name not in [r['character'] for r in roster] for name in pilot):
+                    raise CheckinError('Pilot characters must belong to the configured roster.')
+                roster = [r for r in roster if r['character'] in pilot]
             self._save_run(run)
             for identity in roster:
                 observation = self.db.execute('SELECT * FROM checkin_observations WHERE realm=? AND character=?',
@@ -238,6 +266,9 @@ class CheckinCoordinator:
             job=json.loads(row[0])
             if job['status'] not in ('startup','capturing','persisting','attention') or not job['session_id']:
                 raise CheckinError('Takeover is not available while login or logout is in progress.')
+            result = self.service.takeover_checkin(job['session_id'], job['capture_id'])
+            if result.get('state') != 'user_owned':
+                raise CheckinError('Lich has not acknowledged takeover. Session remains reserved.')
             self._save_job(job,status='attention',owned=False,cleanup='user_owned',message='Session kept for manual play. Automatic logout disabled.')
             self._release(job)
             return job
@@ -369,7 +400,7 @@ class CheckinCoordinator:
                         self._save_job(job,status='attention',message='A client attached or ownership changed. Automatic logout suspended.')
                     else:
                         self._save_job(job,status='logging_out',message='Capture saved; logging out.')
-                        self.futures[job['id']]=self.executor.submit(self._disconnect,job['session_id'])
+                        self.futures[job['id']]=self.executor.submit(self._disconnect,job['session_id'],job['capture_id'])
             # Launch only after persisting each reservation and intent. One slot
             # per distinct account, also shared with manual launch entry points.
             active_count=sum(j['status'] in ACTIVE for j in jobs)
@@ -390,6 +421,8 @@ class CheckinCoordinator:
                                    message='Starting a headless Lich session.')
                     self.db.commit()  # Reservation must be visible to the launch adapter.
                     context={'capture_id':capture_id,'startup_mode':self.config.get('daily_checkin',{}).get('startup_mode','ack')}
+                    for key in ('startup_required', 'startup_background'):
+                        context[key] = self.config.get('daily_checkin', {}).get(key, [])
                     self.futures[job['id']]=self.executor.submit(self.service.start_checkin,job['character'],job['realm'],job['id'],context)
                     active_count+=1
             jobs=self._jobs(run['id'])
@@ -397,14 +430,12 @@ class CheckinCoordinator:
                 status='cancelled' if run['status']=='stopping' else ('complete' if all(j['status']=='complete' for j in jobs) else 'attention')
                 run.update(status=status,finished_at=self.clock());self._save_run(run)
 
-    def _disconnect(self, session_id):
+    def _disconnect(self, session_id, capture_id):
         current=next((s for s in self.service.sessions() if s['id']==session_id),None)
         if not current: return {'disconnected':True}
         if current.get('attachment')!='Headless': raise CheckinError('Session has a client; cleanup suspended.')
         # Production adapter rechecks attachment while holding its session lock.
-        if hasattr(self.service,'disconnect_checkin'):
-            return self.service.disconnect_checkin(session_id)
-        return self.service.disconnect(session_id)
+        return self.service.disconnect_checkin(session_id, capture_id)
 
     def reconcile(self):
         with self.lock,self.db:

@@ -36,3 +36,11 @@ class StatusProfilesTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_profile({'wealth': []})
         validate_profile({'wealth': {'bank_balance': 0, 'deeds': None}})
+
+    def test_confirmed_empty_resources_persist_zero_without_losing_it_to_missing_reports(self):
+        self.repo.ingest('prime','Liviloo',{'resources':{'weekly':0,'total':0,'suffused':0,
+                         'observed_at':1000,'suffused_observed_at':1000}},1000)
+        self.repo.ingest('prime','Liviloo',{'resources':{'voln_favor':None}},1100)
+        row=self.repo.get('prime','Liviloo')
+        self.assertEqual(row['snapshot']['resources'],{'weekly':0,'total':0,'suffused':0})
+        self.assertEqual(row['field_observed_at']['resources']['total'],1000)

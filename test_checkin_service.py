@@ -60,11 +60,37 @@ class CheckinServiceTests(unittest.TestCase):
             with self.assertRaises(ServiceError):self.service.disconnect_checkin('1:2')
             close.assert_not_called()
 
-    def test_cleanup_never_falls_through_to_attached_client_exit(self):
-        session=dict(character='Alpha',realm='prime',id='1:2',attachment='Headless')
-        with patch.object(self.service,'_validated',side_effect=[session,dict(session,attachment='Attached')]),patch.object(self.service,'_client_for',return_value={'id':'client'}),patch.object(self.service,'_websocket') as send:
-            with self.assertRaises(ServiceError):self.service.disconnect_checkin('1:2')
+    def test_automatic_cleanup_rejects_legacy_socket_exit_path(self):
+        with patch.object(self.service, '_websocket') as send, patch('gempy_service.socket.create_connection') as connect:
+            with self.assertRaises(ServiceError):
+                self.service.disconnect('1:2', headless_only=True)
             send.assert_not_called()
+            connect.assert_not_called()
 
 
-if __name__=='__main__':unittest.main()
+class OwnershipAdapterTests(unittest.TestCase):
+    setUp = CheckinServiceTests.setUp
+    tearDown = CheckinServiceTests.tearDown
+
+    def test_cleanup_uses_local_arbiter_without_frontend_socket(self):
+        session = dict(character='Alpha', realm='prime', id='1:2', pid=1, start=2, attachment='Headless')
+        with patch.object(self.service, '_validated', return_value=session), \
+             patch.object(self.service, '_checkin_control', return_value={'state':'logging_out'}, create=True) as control, \
+             patch('gempy_service.process_info', return_value=None), \
+             patch.object(self.service, 'disconnect') as legacy:
+            result = self.service.disconnect_checkin('1:2', 'a'*48)
+            self.assertTrue(result['disconnected'])
+            control.assert_called_once_with(session, 'a'*48, 'logout')
+            legacy.assert_not_called()
+
+    def test_cleanup_refusal_never_falls_back_to_exit(self):
+        session = dict(character='Alpha', realm='prime', id='1:2', pid=1, start=2, attachment='Headless')
+        with patch.object(self.service, '_validated', return_value=session), \
+             patch.object(self.service, '_checkin_control', return_value={'state':'user_owned'}, create=True), \
+             patch.object(self.service, 'disconnect') as legacy:
+            with self.assertRaises(ServiceError): self.service.disconnect_checkin('1:2', 'a'*48)
+            legacy.assert_not_called()
+
+
+if __name__ == '__main__':
+    unittest.main()

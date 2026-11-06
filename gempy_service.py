@@ -4,6 +4,7 @@ Discovery never connects to a detachable listener. Credentials stay here.
 """
 import json
 import os
+import re
 from pathlib import Path
 import signal
 import socket
@@ -87,6 +88,7 @@ def start_backend(lich_bin, character, port, realm_flags=(), active_session_dir=
     options = {}
     if checkin_context is not None:
         options['env'] = dict(os.environ, GEMPY_CHECKIN_CONTEXT=json.dumps(checkin_context))
+        cmd[1:1] = ['-r', str(Path(__file__).resolve().parent / 'scripts/gempy_checkin_ownership.rb')]
     return subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL, start_new_session=True, **options)
 
@@ -227,8 +229,8 @@ class Service:
         return processes
 
     def sessions(self):
-        return [{k: p[k] for k in ('id', 'pid', 'character', 'realm', 'port', 'attachment', 'running')}
-                for p in self._discover()]
+        return [dict({k: p[k] for k in ('id', 'pid', 'character', 'realm', 'port', 'attachment', 'running')},
+                     started_at=p.get('epoch_start')) for p in self._discover()]
 
     def _validated(self, session_id):
         p = next((p for p in self._discover() if p['id'] == session_id), None)
@@ -356,7 +358,23 @@ class Service:
         with self._lock(('launch', character.lower(), realm)):
             existing = next((p for p in self._discover() if p['character'].lower() == character.lower() and p['realm'] == realm), None)
             if existing:
+                if checkin_context is not None:
+                    raise ServiceError('A session appeared during check-in preflight; ownership was not acquired.')
                 return existing
+            if checkin_context is not None:
+                # The hook must run before Lich's first client registration. Verify the
+                # installed registration path before launching any real account.
+                root = Path(self.lich).parent
+                try:
+                    main = (root / 'lib/main/main.rb').read_text()
+                    definitions = (root / 'lib/global_defs.rb').read_text()
+                    if 'detachable_client_register(client)' not in main or 'def detachable_clients_snapshot' not in definitions or 'def lich_shutdown' not in definitions:
+                        raise ValueError()
+                except (OSError, ValueError):
+                    raise ServiceError('Installed Lich lacks the required ownership arbitration hooks.') from None
+                checkin_context = dict(checkin_context, control_socket=str(self._checkin_socket(checkin_context.get('capture_id'))))
+                if self.config.get('daily_checkin', {}).get('reporter_url'):
+                    checkin_context['reporter_url'] = self.config['daily_checkin']['reporter_url']
             port = self._allocate()
             try:
                 flags = self.config.get('realms', {}).get(realm, DEFAULT_REALM_FLAGS[realm])
@@ -516,18 +534,67 @@ class Service:
             return {'session_id': session_id, 'web_port': entry['port'],
                     'pairing_path': ('/play' if client == 'vellum_web' else '/despana') + '#token=' + quote(self._token(entry), safe='')}
 
-    def disconnect_checkin(self, session_id):
+    def _checkin_socket(self, capture_id):
+        if not isinstance(capture_id, str) or not re.fullmatch(r'[a-f0-9]{48}', capture_id):
+            raise ServiceError('Missing or invalid check-in ownership identity.')
+        directory = self.state / 'checkin'
+        directory.mkdir(mode=0o700, exist_ok=True)
+        directory.chmod(0o700)
+        path = directory / (capture_id[:24] + '.sock')
+        if len(os.fsencode(path)) >= 108:
+            raise ServiceError('Check-in state path is too long for a local control socket.')
+        return path
+
+    def _checkin_control(self, session, capture_id, action):
+        path = self._checkin_socket(capture_id)
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+                sock.settimeout(70 if action == 'logout' else 5)
+                sock.connect(str(path))
+                self._validated(session['id'])
+                sock.sendall((json.dumps(dict(action=action, capture_id=capture_id,
+                    pid=session['pid'], process_start=session['start'])) + '\n').encode())
+                reply = b''
+                while b'\n' not in reply and len(reply) <= 4096:
+                    chunk = sock.recv(4096)
+                    if not chunk: break
+                    reply += chunk
+            result = json.loads(reply)
+            if (result.get('pid'), result.get('process_start'), result.get('capture_id'), result.get('protocol')) != (session['pid'], session['start'], capture_id, 1):
+                raise ValueError()
+            return result
+        except (OSError, ValueError, TypeError):
+            raise ServiceError('Lich ownership acknowledgment unavailable. Automatic cleanup suspended.') from None
+
+    def takeover_checkin(self, session_id, capture_id):
         with self._lock(session_id):
-            if self._validated(session_id).get('attachment') != 'Headless':
+            result = self._checkin_control(self._validated(session_id), capture_id, 'takeover')
+            if result.get('state') != 'user_owned':
+                raise ServiceError('Lich could not disarm automatic logout; takeover was not acknowledged.')
+            return result
+
+    def disconnect_checkin(self, session_id, capture_id=None):
+        with self._lock(session_id):
+            session = self._validated(session_id)
+            if session.get('attachment') != 'Headless':
                 raise ServiceError('Client attached. Automatic cleanup suspended.')
-            return self.disconnect(session_id, headless_only=True)
+            result = self._checkin_control(session, capture_id, 'logout')
+            if result.get('state') != 'logging_out':
+                raise ServiceError('Lich refused automatic logout because ownership changed or is uncertain.')
+            deadline = time.monotonic() + 70
+            while time.monotonic() < deadline:
+                current = process_info(session['pid'])
+                if not current or current['start'] != session['start']:
+                    return {'session_id': session_id, 'disconnected': True}
+                time.sleep(.25)
+            raise ServiceError('Owned session did not close after orderly logout. Account remains reserved.')
 
     def disconnect(self, session_id, force=False, headless_only=False):
+        if headless_only:
+            raise ServiceError('Automatic cleanup requires Lich ownership arbitration.')
         with self._lock(session_id):
             p = self._validated(session_id)
             entry = self._client_for(p)
-            if headless_only and (force or p['attachment'] != 'Headless' or entry):
-                raise ServiceError('Client state changed. Automatic cleanup suspended.')
             deadline = time.monotonic() + (10 if force else 70)
             if force:
                 # Revalidate immediately before signaling; pidfd closes PID-reuse race.
@@ -544,19 +611,11 @@ class Service:
             else:
                 if p['attachment'] == 'Attached' and not self._multi_client(p):
                     raise ServiceError('This Lich version cannot accept an additional client. Close the attached frontend and retry.')
-                current_session = self._validated(session_id)
-                if headless_only and current_session.get('attachment') != 'Headless':
-                    raise ServiceError('Client attached. Automatic cleanup suspended.')
+                self._validated(session_id)
                 try:
                     with socket.create_connection(('127.0.0.1', p['port']), timeout=3) as sock:
                         # Revalidate after connect before submitting the destructive command.
                         self._validated(session_id)
-                        if headless_only:
-                            rows, inodes = tcp_rows(), socket_inodes(p['pid'])
-                            client_port = sock.getsockname()[1]
-                            connections = None if rows is None or inodes is None else [r for r in rows if r['local']==p['port'] and r['state']=='01' and r['inode'] in inodes]
-                            if not connections or len(connections)!=1 or connections[0]['remote']!=client_port:
-                                raise ServiceError('Cannot confirm exclusive cleanup connection. Automatic logout suspended.')
                         sock.sendall(b'exit\n')
                         # Keep reading startup output until Lich consumes exit and closes.
                         sock.settimeout(0.5)

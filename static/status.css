@@ -27,3 +27,8 @@
 .status-reset.is-ready{color:var(--green)}.status-note,#statusEmpty{color:var(--muted);font-size:11px;line-height:1.7;margin-top:16px}
 .status-sr-only{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 @media(max-width:650px){.status-filters{gap:10px}.status-search{flex-basis:100%}.status-filters label:not(.status-search){flex:1;min-width:125px}.status-filters select{width:100%;max-width:none}.status-summary{gap:7px}.status-table th,.status-table td{padding:12px 10px}}
+.status-heading{display:grid;grid-template-columns:minmax(0,1fr) auto auto}
+.status-bank{text-align:right;min-width:0}
+#statusBankLabel{font-size:10px;color:var(--muted)}.status-bank-amount{display:flex;align-items:baseline;justify-content:flex-end;gap:7px;margin-top:3px;flex-wrap:wrap}.status-bank-amount strong{font-size:24px;font-weight:550;color:var(--gold);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.status-bank-amount span{font-size:11px;color:var(--muted)}
+.status-bank-context{line-height:1.5;color:var(--muted)}.status-heading .status-bank-context p{font-size:10px;margin:3px 0 0}
+@media(max-width:650px){.status-heading{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px 12px}.status-bank{grid-column:2;grid-row:1/3;align-self:start}.status-bank-amount strong{font-size:20px}#statusRefresh{justify-self:start}.status-heading>div:first-child p{display:none}}

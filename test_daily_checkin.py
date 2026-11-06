@@ -27,6 +27,12 @@ class FakeService:
         self.online.append(session)
         return session
 
+    def takeover_checkin(self, session_id, capture_id):
+        return {'state':'user_owned'}
+
+    def disconnect_checkin(self, session_id, capture_id):
+        return self.disconnect(session_id)
+
     def disconnect(self, session_id, force=False):
         assert not force
         self.closed.append(session_id)
@@ -85,6 +91,18 @@ class CheckinTests(unittest.TestCase):
         self.payload=lambda job:{}
         self.capture(job)
         self.assertEqual(self.engine.snapshot()['run']['jobs'][0]['outcome'],'partial')
+
+    def test_fresh_zero_resources_complete_and_persist_capture(self):
+        self.engine.start_run();self.pump(lambda:len(self.service.started)==2)
+        job=self.engine.snapshot()['run']['jobs'][0]
+        payload=self.payload(job)
+        payload['resources']={'weekly':0,'total':0,'suffused':0,'observed_at':self.now}
+        self.payload=lambda job:payload
+        self.capture(job)
+        self.assertEqual(self.engine.snapshot()['run']['jobs'][0]['outcome'],'complete')
+        import json
+        saved=json.loads(self.db.execute('SELECT data FROM checkin_captures WHERE capture_id=?',(job['capture_id'],)).fetchone()[0])
+        self.assertEqual(saved['resources']['total'],0)
 
     def test_disabled_by_default_never_starts(self):
         self.engine.config['daily_checkin']['allow_live_operations'] = False
@@ -188,6 +206,46 @@ class CheckinTests(unittest.TestCase):
         self.assertFalse(result['owned'])
         self.assertEqual(self.engine.report({},job['session_id']),{'checkin_release':job['capture_id']})
         self.engine.tick();self.assertEqual(self.service.closed,[])
+
+    def test_live_sessions_are_current_even_without_a_run(self):
+        self.service.online = [dict(id='manual:1', character='Alpha', realm='prime',
+            attachment='Attached', running=True, started_at=self.now-42.8, secret='not public')]
+        row = self.engine.live_sessions()[0]
+        self.assertEqual(row['character'], 'Alpha')
+        self.assertEqual(row['account_label'], 'A')
+        self.assertEqual(row['elapsed_seconds'], 42)
+        self.assertEqual(row['status'], 'online')
+        self.assertNotIn('secret', row)
+        self.service.online = []
+        self.assertEqual(self.engine.live_sessions(), [])
+
+    def test_live_session_status_uses_exact_session_identity(self):
+        self.engine.start_run(); self.pump(lambda: self.engine.snapshot()['run']['jobs'][0]['session_id'] is not None)
+        job = self.engine.snapshot()['run']['jobs'][0]
+        self.assertEqual(next(s for s in self.engine.live_sessions() if s['id']==job['session_id'])['status'], 'startup')
+        self.service.online = [dict(id='new:1', character=job['character'], realm=job['realm'], attachment='Headless')]
+        row = self.engine.live_sessions()[0]
+        self.assertEqual(row['status'], 'online')
+        self.assertIsNone(row['elapsed_seconds'])
+        self.service.online[0]['started_at'] = self.now+10
+        self.assertEqual(self.engine.live_sessions()[0]['elapsed_seconds'], 0)
+
+    def test_pilot_scope_keeps_full_account_exclusion_but_queues_one_character(self):
+        self.engine.config['daily_checkin']['pilot_characters'] = ['Beta']
+        self.engine.start_run()
+        self.assertEqual([j['character'] for j in self.engine.snapshot()['run']['jobs']], ['Beta'])
+        self.service.online = [dict(id='user', character='Alpha', realm='prime', attachment='Headless')]
+        self.engine.tick()
+        self.assertEqual(self.service.started, [])
+
+    def test_takeover_without_lich_ack_keeps_reservation_and_ownership(self):
+        self.engine.start_run(); self.pump(lambda: self.engine.snapshot()['run']['jobs'][0]['session_id'] is not None)
+        job = self.engine.snapshot()['run']['jobs'][0]
+        self.service.takeover_checkin = lambda *_: {'state':'logging_out'}
+        with self.assertRaises(CheckinError): self.engine.takeover(job['id'])
+        current = self.engine.snapshot()['run']['jobs'][0]
+        self.assertTrue(current['owned'])
+        self.assertIsNotNone(self.db.execute('SELECT 1 FROM checkin_reservations WHERE job_id=?', (job['id'],)).fetchone())
 
     def test_successful_capture_is_durable_and_idempotent(self):
         self.engine.start_run();self.pump(lambda:len(self.service.started)==2)

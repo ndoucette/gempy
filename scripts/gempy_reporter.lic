@@ -390,7 +390,11 @@ module GempyReporter
   def self.checkin_step
     return false unless @checkin_request
     return true if @checkin_receipt[:phase] == 'captured'
-    ready = @checkin_ready || @checkin_context['startup_mode'] == 'none'
+    startup = if @checkin_context['startup_mode'] == 'tracked' && defined?(GempyCheckinOwnership)
+                GempyCheckinOwnership.startup.snapshot
+              end
+    @checkin_receipt[:startup_scripts] = startup['scripts'] if startup
+    ready = @checkin_ready || @checkin_context['startup_mode'] == 'none' || (startup && startup['ready'])
     return false unless ready
     @checkin_receipt.merge!(startup_ready: true, phase: 'capturing')
     commands = ['info full', 'skill', 'lumnis info', 'resource', 'experience', 'boost info', 'bank account']
@@ -414,7 +418,7 @@ module GempyReporter
     when 'lumnis info'
       mark.call('bonuses', plain.match?(/Your Gift of Lumnis|You have .*points? of .*experience|Because your account is free,/))
     when 'resource'
-      mark.call('resources', plain.match?(/:\s*[\d,]+\/[\d,]+\s+\(Weekly\)\s+[\d,]+\/[\d,]+\s+\(Total\)/))
+      mark.call('resources', plain.match?(/:\s*[\d,]+\/[\d,]+\s+\(Weekly\)\s+[\d,]+\/[\d,]+\s+\(Total\)/) || empty_resource_response?(lines))
     when 'experience'
       mark.call('experience', plain.match?(/\bExperience:\s*[\d,]+/))
       mark.call('deeds', plain.match?(/Long-Term Exp:\s*[\d,]+\s+Deeds:\s*\d+/))
@@ -437,12 +441,16 @@ module GempyReporter
 
   # Suppress only the requested report, bounded by its first line and prompt.
   # Parse the captured lines explicitly so collection does not depend on hook order.
+  def self.empty_resource_response?(lines)
+    plain = Array(lines).map { |line| line.gsub(/<[^>]*>/, '') }.join("\n")
+    Array(lines).any? { |line| line.match?(/<prompt\b/) } &&
+      plain.match?(/^Health:\s*[\d,]+\/[\d,]+\s+Mana:\s*[\d,]+\/[\d,]+\s+Stamina:\s*[\d,]+\/[\d,]+\s+Spirit:\s*[\d,]+\/[\d,]+\s*$/) &&
+      !plain.match?(/\(Weekly\)|\(Total\)|(?:Essence|Necrotic Energy|Lore Knowledge|Motes of Tranquility|Devotion|Nature's Grace|Grit|Luck Inspiration|Guile|Vitality):/)
+  end
+
   def self.refresh_command(command)
-    # Remote BANK ACCOUNT can consume a bank-runner use; query only at a bank.
-    if command == 'bank account'
-      at_bank = safe { Room.current&.tags.to_a.include?('bank') || XMLData.room_title == '[Pinefar, Depository]' }
-      return unless at_bank
-    end
+    # BANK ACCOUNT only reads balances. Runner uses apply to remote deposits
+    # and withdrawals, so a bank room tag must not gate this query.
     start = if %w[skill].include?(command) || command == 'info full'
               /<output class=["']mono["']\s*\/>|<a exist=|^Name:|\(at level \d+\), your current skill/
             elsif command == 'lumnis info'
@@ -456,6 +464,14 @@ module GempyReporter
             end
     lines = Lich::Util.quiet_command_xml(command, start, /<prompt\b/, true, 5)
     Array(lines).each { |line| observe(line) }
+    if command == 'resource' && empty_resource_response?(lines)
+      # RESOURCE omits profession balances before they unlock. Only a complete
+      # vitals response certifies zero; silence or a timeout remains unavailable.
+      now = Time.now.to_i
+      @resources = { weekly: 0, total: 0, suffused: 0, observed_at: now, suffused_observed_at: now }
+      @profile_observed['resources'] = now
+    end
+    lines
   end
 
   def self.main
@@ -478,7 +494,7 @@ module GempyReporter
           next_command = Time.now + (command_index < commands.length ? @settings['interval'] : @settings['command_interval'])
         end
         data = collect
-        reply = send_to(@settings['url'], data, token: @settings['token'])
+        reply = send_to(@checkin_context&.fetch('reporter_url', nil) || @settings['url'], data, token: @settings['token'])
         accept_checkin_response(reply)
         if @settings['legacy-url']
           safe { send_to(@settings['legacy-url'], data) }

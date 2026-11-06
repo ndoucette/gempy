@@ -19,3 +19,10 @@ test('demo is explicitly local and internally consistent',()=>{
 test('unknown status stays visible instead of being counted complete',()=>{
   assert.equal(ci.label('future_state'),'Unknown state');assert.equal(ci.counts([{status:'future_state'}]).attention,1);
 });
+test('live session elapsed time is whole seconds with unknown and skew handled',()=>{
+  assert.equal(ci.elapsedSeconds({started_at:100},142.9),42);
+  assert.equal(ci.elapsedSeconds({started_at:200},142),0);
+  assert.equal(ci.elapsedSeconds({started_at:null},142),null);
+  assert.equal(ci.elapsedSeconds({},142),null);
+  assert.equal(ci.label('online'),'Online');
+});

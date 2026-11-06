@@ -33,9 +33,11 @@ GempyReporter.observe('  Long-Term Exp: 0  Deeds: 0')
 data = GempyReporter.collect
 assert(data.dig(:resources, :suffused) == 0 && data.dig(:wealth, :deeds) == 0 && data.dig(:wealth, :bank_balance) == 0, 'Known zero preserved')
 module Lich::Util
-  def self.quiet_command_xml(*)
-    raise 'Must not query a remote bank'
+  def self.quiet_command_xml(command, *)
+    raise 'Only the read-only balance query is permitted' unless command == 'bank account'
+    ['You currently have the following amounts on deposit:', '  Total: 42', '<prompt time="5">']
   end
 end
 GempyReporter.refresh_command('bank account')
+assert(GempyReporter.collect.dig(:wealth, :bank_balance) == 42, 'Remote bank balance collected without a bank room tag')
 puts 'Status reporter checks passed'

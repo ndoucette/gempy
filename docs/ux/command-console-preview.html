@@ -1,0 +1,212 @@
+<div id="gempy-command-preview" aria-label="Gempy Live command console mockup">
+  <style>
+    #gempy-command-preview{--gp-bg:light-dark(#f4f3f0,#111315);--gp-panel:light-dark(#fffefa,#181b1e);--gp-nav:light-dark(#eeede8,#151719);--gp-line:light-dark(#d5d7d4,#2b3035);--gp-text:light-dark(#252a2c,#e7e9e8);--gp-muted:light-dark(#5e676c,#a2aaaf);--gp-gold:light-dark(#7a5c25,#d5b77d);--gp-gold-fill:light-dark(#eee4cd,#2d2b25);--gp-green:light-dark(#356b48,#91b69d);--gp-red:light-dark(#a34432,#d69283);--gp-blue:light-dark(#456d8b,#8babc3);font:13px/1.5 Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--gp-text);background:var(--gp-bg);border:1px solid var(--gp-line);border-radius:8px;overflow:hidden;color-scheme:light dark}
+    #gempy-command-preview *{box-sizing:border-box}
+    #gempy-command-preview [hidden]{display:none!important}
+    #gempy-command-preview button,#gempy-command-preview input,#gempy-command-preview select{font:inherit;color:inherit}
+    #gempy-command-preview button{border:1px solid var(--gp-line);background:var(--gp-panel);border-radius:5px;padding:7px 11px;min-height:34px}
+    #gempy-command-preview button:hover:not(:disabled){border-color:var(--gp-gold)}
+    #gempy-command-preview button:disabled{opacity:.55;cursor:default}
+    #gempy-command-preview button:focus-visible,#gempy-command-preview input:focus-visible,#gempy-command-preview select:focus-visible,#gempy-command-preview summary:focus-visible{outline:2px solid var(--gp-gold);outline-offset:3px}
+    #gempy-command-preview input[type=checkbox]{accent-color:var(--gp-gold);width:16px;height:16px;flex:none;margin:0}
+    #gempy-command-preview input[type=text],#gempy-command-preview select{background:var(--gp-bg);border:1px solid var(--gp-line);border-radius:5px;padding:9px 11px;min-width:0}
+    #gempy-command-preview .gp-shell{display:grid;grid-template-columns:145px minmax(0,1fr)}
+    #gempy-command-preview .gp-nav{background:var(--gp-nav);border-right:1px solid var(--gp-line);padding:26px 14px;display:flex;flex-direction:column;gap:25px}
+    #gempy-command-preview .gp-brand{display:flex;align-items:center;gap:9px;color:var(--gp-gold);font-size:18px;font-weight:600;letter-spacing:2px}
+    #gempy-command-preview .gp-brand i{width:23px}
+    #gempy-command-preview .gp-nav-list{display:flex;flex-direction:column;gap:5px}
+    #gempy-command-preview .gp-nav-item{padding:9px 10px;color:var(--gp-muted);display:flex;align-items:center;gap:9px;font-size:12px;border-radius:5px}
+    #gempy-command-preview .gp-nav-item i{width:15px;height:15px}
+    #gempy-command-preview .gp-nav-item.active{color:var(--gp-gold);background:var(--gp-gold-fill)}
+    #gempy-command-preview .gp-nav-count{margin-left:auto}
+    #gempy-command-preview .gp-nav-foot{margin-top:auto;font-size:11px;color:var(--gp-muted)}
+    #gempy-command-preview .gp-main{padding:0 24px 22px;min-width:0}
+    #gempy-command-preview .gp-topbar{display:flex;align-items:center;flex-wrap:wrap;gap:10px 18px;border-bottom:1px solid var(--gp-line);min-height:64px;padding:12px 0;font-size:11px;color:var(--gp-muted)}
+    #gempy-command-preview .gp-breadcrumb span{color:var(--gp-text)}
+    #gempy-command-preview .gp-invoker{color:var(--gp-gold);margin-left:auto}
+    #gempy-command-preview .gp-client-choice{border-left:1px solid var(--gp-line);padding-left:15px}
+    #gempy-command-preview .gp-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:23px 0 18px}
+    #gempy-command-preview h2{font-size:24px;font-weight:500;letter-spacing:-.6px;margin:0}
+    #gempy-command-preview .gp-subtitle{color:var(--gp-muted);font-size:12px;margin:3px 0 0}
+    #gempy-command-preview .gp-heading-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+    #gempy-command-preview .gp-sample{font-size:11px;color:var(--gp-muted);padding:3px 7px;border:1px solid var(--gp-line);border-radius:4px}
+    #gempy-command-preview .gp-toggle[aria-pressed=true]{background:var(--gp-gold-fill);color:var(--gp-gold);border-color:var(--gp-gold)}
+    #gempy-command-preview .gp-command-panel{border:1px solid var(--gp-line);border-top:2px solid var(--gp-gold);border-radius:6px;background:var(--gp-panel);margin-bottom:20px}
+    #gempy-command-preview .gp-panel-head{padding:13px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid var(--gp-line);flex-wrap:wrap}
+    #gempy-command-preview .gp-panel-title{display:flex;align-items:center;gap:8px;font-weight:500}
+    #gempy-command-preview .gp-count{color:var(--gp-gold);font-size:12px;font-weight:400}
+    #gempy-command-preview .gp-target-tools{display:flex;align-items:center;gap:8px}
+    #gempy-command-preview .gp-target-tools button{padding:3px 8px;min-height:28px;font-size:11px}
+    #gempy-command-preview .gp-command-body{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr)}
+    #gempy-command-preview .gp-compose{padding:16px;min-width:0}
+    #gempy-command-preview .gp-label{display:block;color:var(--gp-muted);font-size:11px;margin-bottom:7px}
+    #gempy-command-preview .gp-recipients{display:flex;flex-wrap:wrap;gap:6px;min-height:28px;margin-bottom:14px}
+    #gempy-command-preview .gp-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--gp-line);border-radius:4px;padding:3px 7px;font-size:11px}
+    #gempy-command-preview .gp-chip span{color:var(--gp-muted);font-size:10px}
+    #gempy-command-preview .gp-input-wrap{display:flex;align-items:center;gap:9px;border:1px solid var(--gp-line);border-radius:5px;padding-left:11px;background:var(--gp-bg)}
+    #gempy-command-preview .gp-input-wrap span{color:var(--gp-gold);font:15px ui-monospace,monospace}
+    #gempy-command-preview #gp-command{border:0;background:transparent;width:100%;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;padding-left:0}
+    #gempy-command-preview .gp-compose-hint{font-size:11px;color:var(--gp-muted);margin:8px 0 14px}
+    #gempy-command-preview .gp-compose-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+    #gempy-command-preview .gp-primary{background:var(--gp-gold);border-color:var(--gp-gold);color:var(--gp-bg);font-weight:500}
+    #gempy-command-preview .gp-shortcut{color:var(--gp-muted);font-size:10px;margin-left:6px}
+    #gempy-command-preview #gp-recent{font-size:11px;max-width:150px;padding:7px}
+    #gempy-command-preview .gp-last{padding:16px;border-left:1px solid var(--gp-line);min-width:0}
+    #gempy-command-preview .gp-result-head{display:flex;justify-content:space-between;align-items:center;gap:7px;font-size:11px;margin-bottom:8px;color:var(--gp-muted)}
+    #gempy-command-preview .gp-result-command{font:12px ui-monospace,SFMono-Regular,Consolas,monospace;margin-bottom:9px;overflow-wrap:anywhere}
+    #gempy-command-preview .gp-result-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid var(--gp-line);font-size:11px;flex-wrap:wrap}
+    #gempy-command-preview .gp-result-state{color:var(--gp-green)}
+    #gempy-command-preview .gp-result-state.uncertain{color:var(--gp-gold)}
+    #gempy-command-preview .gp-result-name{display:flex;align-items:center;gap:5px}
+    #gempy-command-preview .gp-client-link{border:0;background:none;padding:1px 3px;min-height:23px;color:var(--gp-muted)}
+    #gempy-command-preview .gp-result-note{font-size:11px;color:var(--gp-muted);margin:8px 0 0}
+    #gempy-command-preview .gp-history{border-top:1px solid var(--gp-line);padding:10px 16px;font-size:11px}
+    #gempy-command-preview .gp-history summary{color:var(--gp-muted)}
+    #gempy-command-preview .gp-history-item{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--gp-line)}
+    #gempy-command-preview .gp-history-item:first-child{margin-top:8px}
+    #gempy-command-preview .gp-history-item code{font-size:11px;overflow-wrap:anywhere}
+    #gempy-command-preview .gp-history-item button{font-size:11px;min-height:27px;padding:3px 7px}
+    #gempy-command-preview .gp-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}
+    #gempy-command-preview .gp-card{background:var(--gp-panel);border:1px solid var(--gp-line);border-radius:6px;padding:15px;min-width:0}
+    #gempy-command-preview .gp-card[data-selected=true]{border-color:var(--gp-gold)}
+    #gempy-command-preview .gp-card-top{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:11px}
+    #gempy-command-preview .gp-card-identity{display:flex;gap:9px;align-items:center;min-width:0}
+    #gempy-command-preview .gp-card-identity label{display:flex;gap:9px;align-items:center}
+    #gempy-command-preview .gp-name{font-size:14px;font-weight:500}
+    #gempy-command-preview .gp-realm{font-size:10px;color:var(--gp-muted);padding:1px 4px;border:1px solid var(--gp-line);border-radius:3px}
+    #gempy-command-preview .gp-card-command{font-size:11px;padding:2px 6px;min-height:27px;color:var(--gp-gold)}
+    #gempy-command-preview .gp-card-content{display:grid;grid-template-columns:minmax(0,1fr) minmax(100px,.85fr);gap:12px}
+    #gempy-command-preview .gp-location{font-size:12px;margin-bottom:3px}
+    #gempy-command-preview .gp-detail{font-size:11px;color:var(--gp-muted)}
+    #gempy-command-preview .gp-ready{font-size:11px;color:var(--gp-green);margin-top:10px}
+    #gempy-command-preview .gp-ready.unavailable{color:var(--gp-muted)}
+    #gempy-command-preview .gp-vital{display:grid;grid-template-columns:37px 1fr;gap:4px 7px;align-items:center;font-size:10px;margin-bottom:7px;color:var(--gp-muted)}
+    #gempy-command-preview .gp-vital strong{font-weight:400;text-align:right;color:var(--gp-text);font-variant-numeric:tabular-nums}
+    #gempy-command-preview .gp-track{grid-column:1/-1;background:var(--gp-line);height:3px;border-radius:2px;overflow:hidden}
+    #gempy-command-preview .gp-track span{display:block;height:100%;background:var(--gp-green)}
+    #gempy-command-preview .gp-vital.mana .gp-track span{background:var(--gp-blue)}
+    #gempy-command-preview .gp-footer{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;color:var(--gp-muted);font-size:11px;margin-top:14px}
+    #gempy-command-preview .gp-message{font-size:12px;color:var(--gp-gold);margin:10px 0 0;overflow-wrap:anywhere}
+    #gempy-command-preview .gp-error{font-size:12px;color:var(--gp-red);margin:8px 0}
+    #gempy-command-preview[data-results=below] .gp-command-body{grid-template-columns:1fr}
+    #gempy-command-preview[data-results=below] .gp-last{border-left:0;border-top:1px solid var(--gp-line)}
+    #gempy-command-preview[data-density=compact] .gp-card{padding:11px}
+    #gempy-command-preview[data-density=compact] .gp-ready{margin-top:5px}
+    @media(max-width:820px){#gempy-command-preview .gp-shell{grid-template-columns:1fr}#gempy-command-preview .gp-nav{flex-direction:row;align-items:center;gap:15px;padding:12px 18px;border-right:0;border-bottom:1px solid var(--gp-line);flex-wrap:wrap}#gempy-command-preview .gp-nav-list{flex-direction:row;flex-wrap:wrap;gap:1px}#gempy-command-preview .gp-nav-item{padding:6px 9px}#gempy-command-preview .gp-nav-foot{display:none}#gempy-command-preview .gp-brand{font-size:15px}#gempy-command-preview .gp-nav-item i{display:none}#gempy-command-preview .gp-main{padding:0 18px 18px}}
+    @media(max-width:580px){#gempy-command-preview .gp-command-body{grid-template-columns:1fr}#gempy-command-preview .gp-last{border-left:0;border-top:1px solid var(--gp-line)}#gempy-command-preview .gp-grid{grid-template-columns:1fr}#gempy-command-preview .gp-invoker{margin-left:0}#gempy-command-preview .gp-client-choice{padding-left:0;border:0}#gempy-command-preview .gp-topbar{gap:5px 13px}#gempy-command-preview .gp-heading{margin:17px 0 14px}#gempy-command-preview .gp-nav{gap:8px;padding:12px}#gempy-command-preview .gp-nav-list{width:100%;justify-content:space-between}#gempy-command-preview .gp-nav-item{padding:5px 4px;font-size:11px}#gempy-command-preview .gp-main{padding:0 12px 16px}#gempy-command-preview .gp-compose,#gempy-command-preview .gp-last{padding:13px}#gempy-command-preview .gp-panel-head{padding:11px 13px}#gempy-command-preview .gp-shortcut{display:none}#gempy-command-preview #gp-command{font-size:16px}#gempy-command-preview .gp-card-command{min-height:34px}}
+    @media(pointer:coarse){#gempy-command-preview button{min-height:44px}#gempy-command-preview .gp-card-identity label{min-height:44px}#gempy-command-preview input[type=text]{min-height:44px;font-size:16px}}
+  </style>
+  <div class="gp-shell">
+    <aside class="gp-nav" aria-label="Gempy workspace navigation preview">
+      <div class="gp-brand"><i data-lucide="gem" aria-hidden="true"></i>GEMPY</div>
+      <div class="gp-nav-list">
+        <span class="gp-nav-item active"><i data-lucide="radio" aria-hidden="true"></i>Live <span class="gp-nav-count">4</span></span>
+        <span class="gp-nav-item"><i data-lucide="calendar-check" aria-hidden="true"></i>Check-in</span>
+        <span class="gp-nav-item"><i data-lucide="repeat" aria-hidden="true"></i>Rotation</span>
+        <span class="gp-nav-item"><i data-lucide="trending-up" aria-hidden="true"></i>Progress</span>
+        <span class="gp-nav-item"><i data-lucide="users" aria-hidden="true"></i>Characters</span>
+        <span class="gp-nav-item"><i data-lucide="settings" aria-hidden="true"></i>Settings</span>
+      </div>
+      <div class="gp-nav-foot">Character monitor<br>Preview only</div>
+    </aside>
+    <main class="gp-main">
+      <header class="gp-topbar"><div class="gp-breadcrumb">Elanthia / <span>Live</span></div><div class="gp-invoker">Invoker · next 9:00 AM PDT</div><div class="gp-client-choice">Client · Vellum Despana</div></header>
+      <div class="gp-heading"><div><h2>Live characters</h2><p class="gp-subtitle">4 online · 3 available for commands</p></div><div class="gp-heading-actions"><span class="gp-sample">Interactive mockup · sample data</span><button id="gp-toggle" class="gp-toggle cursor-interaction" type="button" aria-pressed="true" aria-controls="gp-panel">Commands</button></div></div>
+      <section class="gp-command-panel" id="gp-panel" aria-label="Send a command">
+        <div class="gp-panel-head"><div class="gp-panel-title">Command <span id="gp-count" class="gp-count">2 selected</span></div><div class="gp-target-tools"><button id="gp-all" class="cursor-interaction" type="button">All online (3)</button><button id="gp-clear" class="cursor-interaction" type="button">Clear</button></div></div>
+        <div class="gp-command-body">
+          <div class="gp-compose">
+            <span class="gp-label">TO</span><div class="gp-recipients" id="gp-recipients" aria-live="polite"></div>
+            <label class="gp-label" for="gp-command">GAME OR LICH COMMAND</label>
+            <div class="gp-input-wrap"><span aria-hidden="true">&gt;</span><input id="gp-command" type="text" autocomplete="off" spellcheck="false" value=";pause all" placeholder="look or ;pause all" aria-describedby="gp-hint gp-error"></div>
+            <p class="gp-compose-hint" id="gp-hint">Send once to each selected character.</p>
+            <div id="gp-error" class="gp-error" role="alert" hidden></div>
+            <div class="gp-compose-actions"><select id="gp-recent" aria-label="Recall a recent command"><option value="">Recent commands</option><option value="look">look</option><option value=";pause all">;pause all</option><option value=";unpause all">;unpause all</option><option value=";invokerhour">;invokerhour</option></select><div><button id="gp-send" class="gp-primary cursor-interaction" type="button">Send to 2 characters</button><span class="gp-shortcut">⌘ / Ctrl ↵</span></div></div>
+          </div>
+          <div class="gp-last" aria-label="Latest command delivery"><div class="gp-result-head"><span>LATEST DELIVERY</span><span id="gp-result-time">8:42 AM PDT</span></div><div class="gp-result-command" id="gp-result-command">look</div><div id="gp-results" aria-live="polite"></div><p class="gp-result-note" id="gp-result-note">Delivery confirmed. View game output in the client.</p></div>
+        </div>
+        <details class="gp-history"><summary>Recent deliveries</summary><div id="gp-history-items"></div></details>
+      </section>
+      <div class="gp-grid" id="gp-cards" aria-label="Online character selection"></div>
+      <p id="gp-message" class="gp-message" role="status" hidden></p>
+      <div class="gp-footer"><span>Sample session snapshot · October 30, 2026</span><span id="gp-excluded">1 online character needs the control bridge.</span></div>
+    </main>
+  </div>
+  <script>
+  (()=>{
+    const root=document.getElementById('gempy-command-preview');
+    const $=id=>root.querySelector('#'+id);
+    const chars=[
+      {id:'dartwen',name:'Dartwen',realm:'Prime',ready:true,level:'100 · Sorcerer',room:'Old Ta’Faendryl',script:'Hunting · bigshot',hp:[166,166],mana:[312,355]},
+      {id:'prepotente',name:'Prepotente',realm:'Prime',ready:true,level:'100 · Rogue',room:'Old Ta’Faendryl',script:'Hunting · otf-prepotente',hp:[187,190],mana:[38,40]},
+      {id:'voxy',name:'Voxy',realm:'Prime',ready:true,level:'74 · Bard',room:'Town Square Central',script:'Resting',hp:[145,145],mana:[210,210]},
+      {id:'renwaldo',name:'Renwaldo',realm:'Prime',ready:false,level:'100 · Wizard',room:'Town Square Central',script:'Resting',hp:[132,132],mana:[354,354]}
+    ];
+    let selected=new Set(['dartwen','prepotente']);
+    let sending=false, panelOpen=true;
+    let history=[{command:'look',names:['Dartwen','Prepotente'],summary:'2 sent to Lich',time:'8:42 AM PDT'}];
+    const design={results:'beside',density:'comfortable',outcome:'delivered'};
+    const el=(tag,cls,txt)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(txt!==undefined)e.textContent=txt;return e;};
+    function note(message){$('gp-message').hidden=!message;$('gp-message').textContent=message;}
+    function error(message){$('gp-error').hidden=!message;$('gp-error').textContent=message;}
+    function saveState(){if(window.openai?.setWidgetState)window.openai.setWidgetState({modelContent:{feature:'Gempy command console',layout:design.results,density:design.density},privateContent:{selected:[...selected],panelOpen,command:$('gp-command').value}}).catch(()=>{});}
+    function setOpen(open){panelOpen=open;$('gp-panel').hidden=!open;$('gp-toggle').setAttribute('aria-pressed',String(open));root.querySelectorAll('.gp-select').forEach(e=>e.hidden=!open);}
+    function updateTargets(){
+      $('gp-recipients').replaceChildren();
+      const targets=chars.filter(c=>selected.has(c.id));
+      if(!targets.length)$('gp-recipients').append(el('span','gp-detail','Select characters below.'));
+      for(const c of targets){const chip=el('span','gp-chip',c.name);chip.append(el('span','',c.realm));$('gp-recipients').append(chip);}
+      $('gp-count').textContent=targets.length+' selected';
+      $('gp-send').textContent=sending?'Sending…':targets.length===1?'Send to '+targets[0].name:'Send to '+targets.length+' characters';
+      $('gp-send').disabled=sending||!targets.length||!$('gp-command').value.trim();
+      for(const c of chars){const card=root.querySelector('[data-character="'+c.id+'"]');if(card){card.dataset.selected=String(selected.has(c.id));card.querySelector('input').checked=selected.has(c.id);}}
+    }
+    function buildCards(){
+      for(const c of chars){
+        const card=el('article','gp-card');card.dataset.character=c.id;
+        const top=el('div','gp-card-top'),identity=el('div','gp-card-identity'),label=el('label');
+        const check=el('input','gp-select cursor-interaction');check.type='checkbox';check.disabled=!c.ready;check.setAttribute('aria-label','Select '+c.name+' on '+c.realm);check.addEventListener('change',()=>{if(check.checked)selected.add(c.id);else selected.delete(c.id);error('');updateTargets();saveState();});
+        label.append(check,el('span','gp-name',c.name));identity.append(label,el('span','gp-realm',c.realm));top.append(identity);
+        const cmd=el('button','gp-card-command cursor-interaction','Command');cmd.type='button';cmd.disabled=!c.ready;cmd.setAttribute('aria-label','Send a command to '+c.name);cmd.addEventListener('click',()=>{selected=new Set([c.id]);setOpen(true);updateTargets();$('gp-command').focus();note('');saveState();});top.append(cmd);
+        const body=el('div','gp-card-content'),info=el('div');info.append(el('div','gp-location',c.room),el('div','gp-detail',c.level),el('div','gp-detail',c.script),el('div','gp-ready'+(!c.ready?' unavailable':''),c.ready?'● Command ready':'Control unavailable · update required'));
+        const vitals=el('div');for(const [name,value,cls] of [['Health',c.hp,''],['Mana',c.mana,'mana']]){const row=el('div','gp-vital '+cls);row.append(el('span','',name),el('strong','',value[0]+' / '+value[1]));const track=el('div','gp-track'),bar=el('span');bar.style.width=(value[0]/value[1]*100)+'%';track.append(bar);row.append(track);vitals.append(row);}
+        body.append(info,vitals);card.append(top,body);$('gp-cards').append(card);
+      }
+    }
+    function renderResults(targets,stage){
+      $('gp-results').replaceChildren();
+      targets.forEach((c,i)=>{
+        const state=stage==='sending'?'Sending…':design.outcome==='partial'&&i===targets.length-1?'Unconfirmed':'Sent to Lich';
+        const row=el('div','gp-result-row'),name=el('span','gp-result-name',c.name),link=el('button','gp-client-link cursor-interaction','↗');link.type='button';link.setAttribute('aria-label','Open '+c.name+' client');link.addEventListener('click',()=>note('Preview: this opens '+c.name+' in the selected client. No game connection is made here.'));name.append(link);row.append(name,el('span','gp-result-state'+(state!=='Sent to Lich'?' uncertain':''),state));$('gp-results').append(row);
+      });
+      $('gp-result-note').textContent=stage==='sending'?'Sending to the selected sessions…':design.outcome==='partial'?'Receipt missing for one character. Inspect its client before resending.':'Delivery confirmed. View game output in the client.';
+    }
+    function renderHistory(){
+      $('gp-history-items').replaceChildren();
+      for(const batch of history.slice(0,5)){const row=el('div','gp-history-item'),desc=el('div');desc.append(el('code','',batch.command),el('div','gp-detail',batch.summary+' · '+batch.time));const btn=el('button','cursor-interaction','Use command again');btn.type='button';btn.addEventListener('click',()=>{$('gp-command').value=batch.command;setOpen(true);error('');updateTargets();$('gp-command').focus();saveState();});row.append(desc,btn);$('gp-history-items').append(row);}
+    }
+    function submit(){
+      if(sending)return;
+      const command=$('gp-command').value,targets=chars.filter(c=>selected.has(c.id));
+      if(!command.trim()||!targets.length){error('Choose at least one character and enter a command.');return;}
+      if(/[\x00-\x1f\x7f]/.test(command)||new TextEncoder().encode(command).length>1024){error('Use one line with no control characters, up to 1,024 bytes.');return;}
+      error('');note('');sending=true;updateTargets();$('gp-result-command').textContent=command;$('gp-result-time').textContent='Just now · sample';renderResults(targets,'sending');
+      setTimeout(()=>{sending=false;const count=targets.length-(design.outcome==='partial'?1:0);history.unshift({command,names:targets.map(c=>c.name),summary:count+' sent to Lich'+(design.outcome==='partial'?' · 1 unconfirmed':''),time:'Just now · sample'});renderResults(targets,'done');renderHistory();if($('gp-command').value===command)$('gp-command').value='';updateTargets();saveState();},500);
+    }
+    function restore(state){const p=state?.privateContent;if(p){if(Array.isArray(p.selected))selected=new Set(p.selected.filter(id=>chars.some(c=>c.id===id&&c.ready)));if(typeof p.command==='string')$('gp-command').value=p.command;if(typeof p.panelOpen==='boolean')setOpen(p.panelOpen);}updateTargets();}
+    buildCards();updateTargets();renderResults(chars.slice(0,2),'done');renderHistory();
+    $('gp-toggle').addEventListener('click',()=>{setOpen(!panelOpen);saveState();});
+    $('gp-all').addEventListener('click',()=>{selected=new Set(chars.filter(c=>c.ready).map(c=>c.id));updateTargets();error('');note('Selected 3 command-ready sessions. Renwaldo is excluded: control bridge unavailable.');saveState();});
+    $('gp-clear').addEventListener('click',()=>{selected.clear();updateTargets();note('');saveState();});
+    $('gp-command').addEventListener('input',()=>{error('');updateTargets();});
+    $('gp-command').addEventListener('change',saveState);
+    $('gp-command').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();if(e.ctrlKey||e.metaKey)submit();}});
+    $('gp-command').addEventListener('paste',e=>{const txt=e.clipboardData?.getData('text')||'';if(/[\r\n]/.test(txt)){e.preventDefault();error('Paste a single command. Multiple lines will not be sent.');}});
+    $('gp-recent').addEventListener('change',()=>{if($('gp-recent').value){$('gp-command').value=$('gp-recent').value;$('gp-recent').value='';error('');updateTargets();saveState();}});
+    $('gp-send').addEventListener('click',submit);
+    restore(window.openai?.widgetState);
+    window.addEventListener('openai:set_globals',e=>{if(e.detail?.globals?.widgetState)restore(e.detail.globals.widgetState);});
+    if(globalThis.Tweak){const tweak=new Tweak({container:root,onChange:()=>{root.dataset.results=design.results;root.dataset.density=design.density;saveState();}});tweak.addSelect(design,'results',{label:'Delivery placement',options:[{label:'Beside command',value:'beside'},{label:'Below command',value:'below'}]});tweak.addSelect(design,'density',{label:'Character spacing',options:['comfortable','compact']});tweak.addSelect(design,'outcome',{label:'Simulated delivery',options:[{label:'All delivered',value:'delivered'},{label:'One unconfirmed',value:'partial'}]});}
+  })();
+  </script>
+</div>

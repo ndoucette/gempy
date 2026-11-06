@@ -3,3 +3,19 @@ config.yaml.*.bak
 .venv/
 __pycache__/
 gempy.log
+
+# Local development environments, credentials, and generated runtime state.
+.env
+.env.*
+!.env.example
+.venv-*/
+.worktrees/
+.local/
+.state/
+.pytest_cache/
+*.log
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+*.sock

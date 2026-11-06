@@ -109,6 +109,8 @@ dialog{padding:27px;border:1px solid #3d4449;background:#1a1e21;color:var(--text
 <link rel="stylesheet" href="/assets/status.css">
 <link rel="stylesheet" href="/assets/checkin.css">
 <link rel="stylesheet" href="/assets/workspace.css">
+<link rel="stylesheet" href="/assets/invoker-buffs.css">
+<link rel="stylesheet" href="/assets/commands.css">
 </head>
 <body>
 <svg aria-hidden="true" width="0" height="0" style="position:absolute"><defs>
@@ -161,7 +163,7 @@ function icon(name,size=14){const svg=document.createElementNS('http://www.w3.or
 function text(tag,value,cls){const el=document.createElement(tag);el.textContent=value;if(cls)el.className=cls;return el}
 function message(value,kind='info'){clearTimeout(messageTimer);const toast=$('message');toast.replaceChildren();toast.dataset.kind=kind;if(!value)return;if(kind==='working')toast.append(text('span','','spinner'));toast.append(text('span',value));if(kind==='success')messageTimer=setTimeout(()=>toast.replaceChildren(),8000);}
 function showLogin(){$('tokenOutput').textContent='';for(const dialog of document.querySelectorAll('dialog[open]'))dialog.close();active=false;$('app').hidden=true;$('loginLayout').hidden=false;}
-async function api(path,method='GET',body){const response=await fetch('/api/'+path,{method,headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:body===undefined?undefined:JSON.stringify(body)});const data=await response.json();if(!response.ok){if(response.status===401)showLogin();throw Error(data.detail||'Request failed. Please try again.')}return data}
+async function api(path,method='GET',body){const response=await fetch('/api/'+path,{method,headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:body===undefined?undefined:JSON.stringify(body)});const data=await response.json();if(!response.ok){if(response.status===401)showLogin();throw Object.assign(Error(data.detail||'Request failed. Please try again.'),{status:response.status})}return data}
 function actionButton(label,onClick,cls='launch-button',symbol='arrow'){const b=text('button',label,cls);b.type='button';b.onclick=onClick;if(symbol)b.append(icon(symbol,12));return b}
 function avatar(name,small=false){const el=text('div',name.slice(0,1).toUpperCase(),'avatar'+(small?' small':''));el.setAttribute('aria-hidden','true');const colors=[['#282e3e','#a3bbdb'],['#302c3e','#c0afe0'],['#26332f','#a0c8b3'],['#36302c','#d8bb94']];const hash=Array.from(name).reduce((sum,char)=>sum+char.charCodeAt(0),0);const [bg,color]=colors[hash%colors.length];el.style.setProperty('--avatar-bg',bg);el.style.setProperty('--avatar-color',color);return el}
 function matchingSession(character){return sessions.find(s=>s.running&&s.realm===realm&&s.character.toLowerCase()===character.toLowerCase())}
@@ -175,7 +177,7 @@ $('addCharacter').onsubmit=async event=>{event.preventDefault();const button=$('
 function confirmDisconnect(session,force=false){const dialog=$('confirmDialog');$('confirmTitle').textContent=(force?'Force disconnect ':'Disconnect ')+session.character+'?';$('confirmDescription').textContent=force?'This will force terminate '+session.character+' on '+session.realm+'. Cleanup may be interrupted. Use this only after an orderly disconnect has failed.':'This ends '+session.character+'’s game session on '+session.realm+'. Gempy will give Lich time to save and clean up before disconnecting.';$('confirmAction').textContent=force?'Force disconnect':'Disconnect';$('confirmAction').onclick=()=>{dialog.close();operation('sessions/'+encodeURIComponent(session.id)+'/'+(force?'force-disconnect':'disconnect'),undefined,false,'session:'+session.id)};dialog.showModal();}
 $('confirmCancel').onclick=()=>$('confirmDialog').close();
 let refreshInProgress=false;
-async function refresh(){if(!active||refreshInProgress)return;refreshInProgress=true;try{const data=await api('sessions');if(!active)return;sessions=data.sessions;const fingerprint=JSON.stringify(sessions);if(fingerprint!==sessionFingerprint){sessionFingerprint=fingerprint;renderCharacters();renderSessions()}$('lastUpdated').textContent=' · '+new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});}catch(error){message(error.message,'error')}finally{refreshInProgress=false}}
+async function refresh(){if(!active||refreshInProgress)return;refreshInProgress=true;try{const data=await api('sessions');if(!active)return;sessions=data.sessions;const fingerprint=JSON.stringify(sessions);if(fingerprint!==sessionFingerprint){sessionFingerprint=fingerprint;renderCharacters();renderSessions()}$('lastUpdated').textContent=' · '+new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});document.dispatchEvent(new Event('gempy:sessions'));}catch(error){message(error.message,'error')}finally{refreshInProgress=false}}
 function decorateClientTab(tab,title,copy,isError=false){if(!tab||tab.closed)return;tab.document.title=title;tab.document.documentElement.style.colorScheme='dark';const body=tab.document.body;body.style.cssText='margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#10131b;color:#eef0f6;font-family:system-ui';const panel=tab.document.createElement('div');panel.style.cssText='max-width:420px;padding:40px';const brand=tab.document.createElement('div');brand.textContent='GEMPY';brand.style.cssText='letter-spacing:4px;color:#e6bd79;font-size:12px;margin-bottom:30px';const h=tab.document.createElement('h1');h.textContent=isError?'A small detour.':'Your adventure awaits.';h.style.cssText='font-family:Georgia,serif;font-weight:400;font-size:32px';const p=tab.document.createElement('p');p.textContent=copy;p.style.cssText='color:#a4aec4;line-height:1.8;font-size:14px';panel.append(brand,h,p);body.replaceChildren(panel);}
 function clientOperation(path,body,key){const client=$('clientChoice').value;return operation(path,{...body,client},client==='vellum_despana'||client==='vellum_web',key)}
 $('clientChoice').onchange=()=>{const choice=$('clientChoice').value;$('clientHint').textContent=choice==='saga'?'Opens a Saga window on the Gempy host, then shows the details for Attach to Lich.':choice==='connection'?'Provides commands for Vellum on this host or through an SSH tunnel.':choice==='vellum_gui'||choice==='vellum_tui'?'Opens a window on the Gempy host, even when your browser is on another computer.':'Opens in your browser. This choice also applies to session attachments.';$('clientChoice').title=$('clientHint').textContent;};
@@ -567,5 +569,7 @@ setInterval(()=>{for(const el of document.querySelectorAll('[data-duration-end]'
 <script src="/assets/status.js"></script>
 <script src="/assets/checkin.js"></script>
 <script src="/assets/workspace.js"></script>
+<script src="/assets/invoker-buffs.js"></script>
+<script src="/assets/commands.js"></script>
 </body>
 </html>

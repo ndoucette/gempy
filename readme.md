@@ -595,6 +595,11 @@ loaded. Use `startup_mode: none` only for characters with no startup work that
 must finish. A missing acknowledgment times out visibly; elapsed time never
 certifies script success. The global mode currently applies to the entire run.
 
+In `startup_mode: tracked`, required scripts must be observed and finite startup
+work must finish successfully. Configure other persistent scripts in
+`startup_background`. The bundled `gempy_control` command bridge is automatically
+recognized as background work when present; it is not required to be installed.
+
 Pause stops new launches; Stop cancels queued work and finishes owned-session
 cleanup. **Keep session for play** disarms cleanup before attaching through
 GemPy. Interrupted or uncertain sessions remain reserved for inspection. After
@@ -623,3 +628,82 @@ This script is provided under the [MIT License](LICENSE). You are free to use, m
 **Enjoy your gaming experience! If you encounter any issues or have suggestions for improvements, feel free to contribute or open an issue.**
 
 ---
+
+### Web command console
+
+Open **Live → Commands**, select individual sessions or **All online**, and review
+recipient names and realms before sending. The card's **Command** action selects
+only that session. All online captures eligible Prime and Test sessions across the
+whole Live roster; new logins are never added automatically. Old selections remain
+marked **Unavailable** after a reconnect or bridge restart. Daily Check-in sessions
+must first be taken over through the existing Daily Check-in workflow.
+
+Commands are literal single lines up to 1,024 UTF-8 bytes. Use the Send button or
+Ctrl+Enter / Cmd+Enter; Enter alone does not send. Gempy does not split semicolons,
+expand client macros, pause hunting scripts, wait for roundtime, or retry game
+rejections. History recall only fills the composer. Active selections and drafts
+are cleared when leaving Live, reloading, or logging out.
+
+**Sent to Lich** confirms that native input handling returned, not that the game
+accepted an action or a script finished. **Not sent** is a definite pre-dispatch
+rejection. **Unconfirmed** means delivery may have occurred: inspect the client
+before explicitly sending again. Network failures trigger receipt lookup, never
+an automatic send retry. A bridge with an outstanding native handler rejects new
+work as busy, keeping receipt queries responsive; wait or inspect the client
+before an explicit new send. Results include Pacific dates and PST/PDT. The private
+`commands.sqlite3` journal retains at most 7 days and 1,000 batches. Restarting
+Gempy never resumes queued command delivery.
+
+#### Bridge setup and rollout
+
+The local rollout was completed on November 2, 2026 after explicit authorization.
+The bridge is installed in `/home/nick/gs4/Lich5/scripts/gempy_control.lic`, global
+Lich autostart is enabled, and Cragstone, Dartwen, Prepotente and Celdiseth were
+verified ready. A four-session `look` batch received confirmed receipts. Cragstone
+was gracefully restarted to verify autostart and rejection of its old identity.
+The dashboard was then restarted without terminating the four game sessions.
+Administrator credentials and `config.yaml` were unchanged. Sign in again after
+the dashboard restart to use **Live → Commands**.
+
+For another installation or future maintenance:
+
+1. Gempy and Lich must run on the same Linux/WSL host under the same OS user.
+   Native Windows and remote sessions remain **Control unavailable**.
+2. Download `gempy_control.lic` from the authenticated `/api/control/script`
+   endpoint, or copy `scripts/gempy_control.lic` from this repository into the
+   configured Lich scripts directory. It has no dependency on the reporter loop.
+3. Use the same private control directory in both environments. The default is
+   `$GEMPY_STATE_DIR/control`, otherwise `$XDG_STATE_HOME/gempy/control`, otherwise
+   `~/.local/state/gempy/control`. Set `GEMPY_CONTROL_DIR` explicitly in both
+   environments if needed. Gempy also accepts `command_control.directory` in YAML;
+   that override must match Lich's `GEMPY_CONTROL_DIR`.
+4. In a designated Lich client, run `;gempy_control --help` to inspect setup, then
+   explicitly start `;gempy_control`. It survives ordinary `;pause all` and
+   `;kill all`; stop it explicitly with `;kill gempy_control`. Autostart is an
+   operator choice after the supervised pilot.
+5. Verify the designated session shows **Command ready**, then perform supervised
+   ordinary input, Lich pause/unpause, multi-target, and reconnect checks before
+   broader rollout. The implementation's tests used only isolated fake sessions.
+
+The bridge probes the running Lich interfaces: native `ClientInputDispatcher`,
+`do_client`, `UserExitDispatch`, shutdown coordination, and observable `Game`
+socket/open/close/read-thread lifecycle. Unsupported or disconnected runtimes fail
+closed; there is no alternate transport. Socket/discovery permissions must remain
+0600 inside a same-user 0700 directory. A stale discovery record prevents startup;
+verify that its original process and bridge are gone before manually removing it.
+No telemetry bearer token or frontend pairing token authorizes command delivery.
+
+Isolated checks (no game connection required):
+
+```bash
+.venv/bin/python -m unittest test_command_service test_command_transport test_command_api test_command_integration
+node --test test_commands.js
+ruby test_command_bridge.rb
+.venv/bin/python examples/command_browser_check.py
+```
+
+The Ruby harness reads native routing source from `GEMPY_TEST_LICH_LIB` (default
+`/home/nick/gs4/Lich5/lib`) without booting Lich. Without that checkout, core bridge
+checks still run and native integration cases are explicitly skipped. The browser
+check requires Playwright and Chromium and writes desktop/mobile screenshots to
+`/tmp/gempy-command-desktop.png` and `/tmp/gempy-command-mobile.png`.

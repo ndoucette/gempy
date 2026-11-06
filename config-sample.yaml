@@ -86,3 +86,8 @@ accounts:
 weekly_rotation:
   account_roles: {}  # account label -> main or utility
   characters: []
+
+# Optional command bridge directory. Must match GEMPY_CONTROL_DIR in Lich.
+# Same Linux/WSL host and OS user only. Starting the bridge is a manual rollout.
+# command_control:
+#   directory: /home/your-user/.local/state/gempy/control

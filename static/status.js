@@ -21,6 +21,14 @@ const characterStatus = (() => {
         total:numeric(resource.total),suffused:numeric(resource.suffused),bank:numeric(wealth.bank_balance),deeds:numeric(wealth.deeds)};
     }));
   }
+  function bankSummary(rows) {
+    const unique=[...new Map(rows.map(row=>[row.realm+':'+row.name.toLowerCase(),row])).values()];
+    const reported=unique.filter(row=>numeric(row.bank)!==null);
+    const times=reported.map(row=>row.profile.field_observed_at?.wealth?.bank_balance).filter(time=>numeric(time)!==null&&time>0);
+    return {balance:reported.length?reported.reduce((sum,row)=>sum+row.bank,0):null,
+      reported:reported.length,characters:unique.length,missing:unique.length-reported.length,
+      oldest:times.length?Math.min(...times):null,undated:reported.length-times.length};
+  }
   function select(rows, filters={}, sort='name', direction=1) {
     const query=(filters.query||'').trim().toLowerCase();
     const range=row=>{
@@ -57,12 +65,17 @@ const characterStatus = (() => {
       invalidate(){pending=null;}
     };
   }
-  return {columns,rows,select,createLoader};
+  return {columns,rows,bankSummary,select,createLoader};
 })();
 if(typeof module!=='undefined'&&module.exports)module.exports=characterStatus;
 if(typeof document!=='undefined')(() => {
   const page=text('section');page.id='status';page.hidden=true;page.setAttribute('aria-labelledby','statusHeading');
-  page.innerHTML=`<div class="page-heading"><div><h2 id="statusHeading">Character status</h2><p>Your whole roster, at a glance.</p></div><button id="statusRefresh" class="secondary" type="button">Refresh</button></div>
+  page.innerHTML=`<div class="page-heading status-heading"><div><h2 id="statusHeading">Character status</h2><p>Your whole roster, at a glance.</p></div>
+    <div class="status-bank" aria-labelledby="statusBankLabel" aria-describedby="statusBankScope statusBankAge" tabindex="0">
+      <div><span id="statusBankLabel">Combined bank balance</span><div class="status-bank-amount"><strong id="statusBankTotal">—</strong><span>silvers</span></div></div>
+      <div class="status-bank-context"><p id="statusBankScope" class="status-sr-only"></p><p id="statusBankCoverage"></p><p id="statusBankAge" class="status-sr-only"></p></div>
+    </div>
+    <button id="statusRefresh" class="secondary" type="button">Refresh</button></div>
     <div class="status-filters">
       <label class="status-search">Search<input id="statusSearch" type="search" placeholder="Name, account or profession"></label>
       <label>Account<select id="statusAccount"><option value="">All accounts</option></select></label>
@@ -126,6 +139,12 @@ if(typeof document!=='undefined')(() => {
   }
   function render(){
     const all=characterStatus.rows(accounts,profiles,state.realm),rows=characterStatus.select(all,state,state.sort,state.direction);
+    const bank=characterStatus.bankSummary(all);
+    $('statusBankTotal').textContent=bank.balance===null?'—':number(bank.balance);
+    $('statusBankScope').textContent='All configured characters · '+(state.realm==='prime'?'Prime':'Test')+' · Unaffected by table filters';
+    $('statusBankCoverage').textContent=loaded?bank.reported+' of '+bank.characters+' characters reported'+(bank.missing?' · '+bank.missing+' missing':''):'Loading saved balances…';
+    $('statusBankAge').textContent=bank.reported?'Latest saved balances'+(bank.oldest?' · Oldest report: '+new Date(bank.oldest*1000).toLocaleString():'')+(bank.undated?' · '+bank.undated+' with unknown observation time':''):'';
+    page.querySelector('.status-bank').title=[$('statusBankScope').textContent,$('statusBankAge').textContent].filter(Boolean).join('\n');
     options('statusAccount',Object.keys(accounts),'All accounts',state.account);
     options('statusProfession',all.map(r=>r.profession),'All professions',state.profession);
     for(const [key,th] of headers){th.setAttribute('aria-sort',state.sort===key?(state.direction===1?'ascending':'descending'):'none');}
@@ -186,7 +205,7 @@ if(typeof document!=='undefined')(() => {
   const previousRefresh=refresh;
   refresh=async function(){await previousRefresh();if(active&&currentView==='status')await load();};
   const option=text('option','Character status');option.value='status';$('settingsForm').elements.default_view.append(option);
-  $('logout').addEventListener('click',()=>{loader.invalidate();profiles=[];loaded=false;$('statusRows').replaceChildren();$('statusError').hidden=true;});
+  $('logout').addEventListener('click',()=>{loader.invalidate();profiles=[];loaded=false;$('statusRows').replaceChildren();$('statusError').hidden=true;for(const id of ['statusBankTotal','statusBankCoverage','statusBankAge','statusBankScope'])$(id).textContent='';page.querySelector('.status-bank').title='';});
   // Authentication may finish while external modules are still loading.
   if(active&&currentView==='status')setTab('status');
 })();

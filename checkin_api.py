@@ -12,7 +12,7 @@ def register_checkin_routes(app, coordinator, authenticated, json_body):
     @app.get('/api/checkin')
     def overview(request: Request):
         authenticated(request)
-        return invoke(coordinator.snapshot)
+        return invoke(lambda: dict(coordinator.snapshot(), sessions=coordinator.live_sessions()))
 
     @app.post('/api/checkin/runs',status_code=202)
     async def start(request: Request):
@@ -23,7 +23,7 @@ def register_checkin_routes(app, coordinator, authenticated, json_body):
     @app.get('/api/checkin/runs/{run_id}')
     def run(run_id: str,request: Request):
         authenticated(request)
-        return invoke(lambda:coordinator.snapshot(run_id))
+        return invoke(lambda:dict(coordinator.snapshot(run_id), sessions=coordinator.live_sessions()))
 
     @app.get('/api/checkin/runs/{run_id}/events')
     def events(run_id: str,request: Request,after: int=0):

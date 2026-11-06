@@ -8,6 +8,20 @@ const profiles = [
   {character:'Hero', realm:'test', snapshot:{wealth:{bank_balance:999}}},
   {character:'Retired', realm:'prime', snapshot:{}}
 ];
+test('bank summary totals configured characters once within the selected realm, including zero',()=>{
+  const saved=[...profiles,{character:'Mage',realm:'prime',snapshot:{wealth:{bank_balance:1250}},field_observed_at:{wealth:{bank_balance:900}}},
+    {character:'Retired',realm:'prime',snapshot:{wealth:{bank_balance:999999}}}];
+  const all=status.rows({...accounts,Duplicate:['HERO']},saved,'prime');
+  assert.deepEqual(status.bankSummary(all),{balance:1250,reported:2,characters:3,missing:1,oldest:900,undated:1});
+  assert.equal(status.select(all,{query:'Mage'}).length,1);
+  assert.equal(status.bankSummary(all).balance,1250);
+  assert.equal(status.bankSummary(status.rows(accounts,saved,'test')).balance,999);
+});
+test('bank summary distinguishes a known zero balance from no reports',()=>{
+  assert.equal(status.bankSummary(status.rows(accounts,profiles,'prime')).balance,0);
+  assert.deepEqual(status.bankSummary(status.rows(accounts,[],'prime')),
+    {balance:null,reported:0,characters:3,missing:3,oldest:null,undated:0});
+});
 test('configured rows include unreported characters and isolate realms',()=>{
   const rows=status.rows(accounts,profiles,'prime',1000);
   assert.deepEqual(rows.map(r=>r.name),['Hero','New','Mage']);

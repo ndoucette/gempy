@@ -22,7 +22,7 @@ class ServiceTests(unittest.TestCase):
     def test_prime_launch_explicitly_selects_gemstone(self):
         child = Mock(pid=12)
         child.poll.return_value = None
-        with patch.object(self.service, '_discover', side_effect=[[], [self.p]]), patch('gempy_service.start_backend', return_value=child) as start, patch('gempy_service.owns_listener', return_value=True), patch.object(self.service, '_track'):
+        with patch.object(self.service, '_discover', side_effect=[[], [], [self.p]]), patch('gempy_service.start_backend', return_value=child) as start, patch('gempy_service.owns_listener', return_value=True), patch.object(self.service, '_track'):
             self.service.ensure_backend('Example', 'prime')
         self.assertEqual(start.call_args.args[3], ['--gemstone'])
 
@@ -69,7 +69,8 @@ class ServiceTests(unittest.TestCase):
         test = dict(self.p, realm='test', id='13:101', pid=13, port=8001)
         with patch.object(self.service, '_discover', return_value=[prime, test]):
             self.assertEqual(self.service.ensure_backend('Example', 'prime')['id'], prime['id'])
-            self.assertEqual(self.service.ensure_backend('Example', 'test')['id'], test['id'])
+            with self.assertRaisesRegex(ServiceError, 'already running'):
+                self.service.ensure_backend('Example', 'test')
 
     def test_unconfigured_launch_rejected(self):
         with self.assertRaises(ServiceError): self.service.launch('Other', 'prime')
@@ -82,6 +83,18 @@ class ServiceTests(unittest.TestCase):
             second = self.service._allocate(port)
             self.assertNotEqual(first, port)
             self.assertNotEqual(first, second)
+
+    def test_checkin_cannot_adopt_session_appearing_after_account_preflight(self):
+        with patch.object(self.service, '_discover', return_value=[self.p]), patch('gempy_service.start_backend') as spawn:
+            with self.assertRaises(ServiceError):
+                self.service._ensure_backend('Example', 'prime', {'capture_id': 'a'*48})
+            spawn.assert_not_called()
+
+    def test_sessions_expose_start_time_without_process_arguments(self):
+        with patch.object(self.service, '_discover', return_value=[dict(self.p, epoch_start=123456, args=['private'])]):
+            row = self.service.sessions()[0]
+        self.assertEqual(row['started_at'], 123456)
+        self.assertNotIn('args', row)
 
     def test_backend_active_api_registration(self):
         with patch('gempy_service.subprocess.Popen') as popen:

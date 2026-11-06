@@ -1,8 +1,11 @@
 /* Daily Check-in. Sample preview is local and can never submit API mutations. */
 const dailyCheckin=(()=>{
   const active=new Set(['logging_in','startup','capturing','persisting','logging_out']);
-  const labels={queued:'Queued',waiting:'Waiting for account',retry_wait:'Retry scheduled',logging_in:'Logging in',startup:'Running login scripts',capturing:'Capturing data',persisting:'Capture saved',logging_out:'Logging out',complete:'Complete',partial:'Incomplete capture',failed:'Failed',attention:'Needs attention',cancelled:'Cancelled',running:'Daily sweep running',paused:'Queue paused',stopping:'Stopping safely'};
+  const labels={online:'Online',queued:'Queued',waiting:'Waiting for account',retry_wait:'Retry scheduled',logging_in:'Logging in',startup:'Running login scripts',capturing:'Capturing data',persisting:'Capture saved',logging_out:'Logging out',complete:'Complete',partial:'Incomplete capture',failed:'Failed',attention:'Needs attention',cancelled:'Cancelled',running:'Daily sweep running',paused:'Queue paused',stopping:'Stopping safely'};
   const label=status=>labels[status]||'Unknown state';
+  function elapsedSeconds(session,now){
+    return typeof session.started_at==='number'&&Number.isFinite(session.started_at)&&session.started_at>0&&Number.isFinite(now)?Math.max(0,Math.floor(now-session.started_at)):null;
+  }
   function counts(jobs){
     const out={total:jobs.length,complete:0,active:0,waiting:0,queued:0,attention:0,cancelled:0};
     for(const j of jobs){if(j.status==='complete')out.complete++;else if(active.has(j.status))out.active++;else if(j.status==='waiting')out.waiting++;else if(['queued','retry_wait'].includes(j.status))out.queued++;else if(j.status==='cancelled')out.cancelled++;else out.attention++;}
@@ -25,9 +28,9 @@ const dailyCheckin=(()=>{
         message:status==='waiting'?'Waiting: Dartwen is playing. Existing session preserved.':label(status),
         fields:status==='capturing'?{character:{status:'captured',observed_at:now},stats:{status:'captured',observed_at:now},skills:{status:'captured',observed_at:now},bank:{status:'unavailable',observed_at:null}}:{}};
     }));
-    return {preview:true,allowed:false,now,game_day:'2026-10-23',settings:{enabled:false,time:'00:15',parallel_accounts:4,freshness_hours:22},history:[],roster:[],run:{id:'sample',status:'running',started_at:now-258,jobs}};
+    return {preview:true,allowed:false,now,sessions:jobs.filter(j=>active.has(j.status)).map((j,i)=>({...j,started_at:now-25-i*12,attachment:'Headless'})),game_day:'2026-10-23',settings:{enabled:false,time:'00:15',parallel_accounts:4,freshness_hours:22},history:[],roster:[],run:{id:'sample',status:'running',started_at:now-258,jobs}};
   }
-  return {active,label,counts,accounts,demo};
+  return {active,label,counts,accounts,demo,elapsedSeconds};
 })();
 if(typeof module!=='undefined')module.exports=dailyCheckin;
 
@@ -41,6 +44,12 @@ if(typeof document!=='undefined')(()=>{
       <div class="ci-summary-main"><div class="ci-progress-area"><div class="ci-progress-numbers"><strong id="ciComplete">0 / 0</strong><span class="ci-muted">characters complete</span></div>
         <progress id="ciProgress" max="1" value="0" aria-label="Characters complete"></progress><div id="ciCounts" class="ci-counts"></div></div>
         <div class="ci-actions"><button type="button" class="secondary" id="ciPause" hidden>Pause queue</button><button type="button" class="danger" id="ciStop" hidden>Stop run</button></div></div></section>
+    <section class="ci-live" aria-labelledby="ciLiveHeading">
+      <div class="ci-section-heading"><div><h3 id="ciLiveHeading">Live sessions</h3><p>Characters currently connected through this GemPy host.</p></div><span id="ciLiveCount" class="ci-muted" aria-live="polite"></span></div>
+      <p id="ciLiveNotice" class="ci-muted" hidden></p>
+      <div class="ci-live-scroll"><table id="ciLiveTable"><thead><tr><th scope="col">Character</th><th scope="col" title="Elapsed seconds since the Lich session started">Login time</th><th scope="col">Status</th></tr></thead><tbody id="ciLiveRows"></tbody></table></div>
+      <p id="ciLiveEmpty" class="ci-empty">Loading live sessions…</p>
+    </section>
     <div class="ci-workspace"><section class="ci-queues" aria-label="Account queues"><div class="ci-section-heading"><div><h3>Account queues</h3><p id="ciSlots"></p></div>
       <label class="ci-attention-filter"><input id="ciAttention" type="checkbox"> Needs attention</label></div><div id="ciAccounts"></div></section>
       <section class="ci-detail" id="ciDetail" aria-label="Selected character progress"></section></div>
@@ -57,9 +66,38 @@ if(typeof document!=='undefined')(()=>{
   let data=null,selectedAccount=null,selectedJob=null,preview=false,busy=false,revision=0,loadFailed=false;
   const age=stamp=>!stamp?'Not captured':Math.max(0,Math.round(((data?.now||Date.now()/1000)-stamp)/60))<1?'Just now':Math.max(1,Math.round(((data?.now||Date.now()/1000)-stamp)/60))+'m ago';
   const date=stamp=>new Date(stamp*1000).toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+  let receivedAt=performance.now(),frozenSessionNow=0;
+  const sessionNow=()=>loadFailed?frozenSessionNow:(data?.now||Date.now()/1000)+(performance.now()-receivedAt)/1000;
   function jobs(){return data?.run?.jobs||data?.roster?.map((r,i)=>({...r,id:'roster-'+i,status:'queued',realm:'prime',fields:{},message:'Ready for the next check-in.'}))||[];}
   function button(label,callback,css='secondary'){const el=actionButton(label,callback,css,null);el.type='button';return el;}
+  function renderSessionTimes(){
+    if(!data)return;
+    for(const cell of $('ciLiveRows').querySelectorAll('[data-session-start]')){
+      const seconds=dailyCheckin.elapsedSeconds({started_at:Number(cell.dataset.sessionStart)},sessionNow());
+      cell.textContent=seconds===null?'Unknown':seconds.toLocaleString()+' s';
+    }
+  }
+  function renderSessions(){
+    const rows=$('ciLiveRows');rows.replaceChildren();
+    const online=data?.sessions||[];
+    $('ciLiveCount').textContent=data?online.length+' online':'';
+    $('ciLiveTable').hidden=!online.length;
+    $('ciLiveEmpty').hidden=!!online.length;
+    $('ciLiveEmpty').textContent=!data?'Loading live sessions…':loadFailed?'Current sessions could not be refreshed.':'No characters are currently logged in.';
+    $('ciLiveNotice').hidden=!loadFailed;
+    $('ciLiveNotice').textContent='Update unavailable · showing last known sessions.';
+    for(const session of online){
+      const row=document.createElement('tr'),name=document.createElement('td'),elapsed=document.createElement('td'),status=document.createElement('td');
+      name.append(text('strong',session.character),text('small',session.account_label+' · '+(session.realm==='prime'?'Prime':session.realm==='test'?'Test':session.realm),'ci-small'));
+      elapsed.className='ci-session-time';elapsed.textContent='Unknown';
+      if(typeof session.started_at==='number'&&Number.isFinite(session.started_at)&&session.started_at>0){elapsed.dataset.sessionStart=session.started_at;elapsed.title='Session started '+date(session.started_at);}
+      status.append(text('span',dailyCheckin.label(session.status),session.status==='online'?'ci-working':'ci-live-status'),text('small',session.attachment==='Attached'?'Client attached':session.attachment==='Headless'?'Headless':'Attachment unknown','ci-small'));
+      row.append(name,elapsed,status);rows.append(row);
+    }
+    renderSessionTimes();
+  }
   function render(){
+    renderSessions();
     if(!data){for(const id of ['ciRun','ciPause','ciStop','ciSchedule'])$(id).disabled=true;$('ciAccounts').replaceChildren();$('ciDetail').replaceChildren();return;}
     $('ciSchedule').disabled=busy||loadFailed;
     const all=jobs(),count=dailyCheckin.counts(all),run=data.run,historical=!!$('ciHistory').value;
@@ -150,8 +188,8 @@ if(typeof document!=='undefined')(()=>{
   async function load(){
     if(!active||currentView!=='checkin'||preview)return;
     const token=++revision,history=$('ciHistory').value;
-    try{const value=await api(history?'checkin/runs/'+encodeURIComponent(history):'checkin');if(token!==revision||!active||currentView!=='checkin'||preview)return;data=value;loadFailed=false;$('ciError').hidden=true;render();}
-    catch(error){if(token!==revision||preview||currentView!=='checkin')return;loadFailed=true;$('ciError').textContent='Could not update check-in progress. '+error.message;$('ciError').hidden=false;render();}
+    try{const value=await api(history?'checkin/runs/'+encodeURIComponent(history):'checkin');if(token!==revision||!active||currentView!=='checkin'||preview)return;data=value;receivedAt=performance.now();loadFailed=false;$('ciError').hidden=true;render();}
+    catch(error){if(token!==revision||preview||currentView!=='checkin')return;frozenSessionNow=sessionNow();loadFailed=true;$('ciError').textContent='Could not update check-in progress. '+error.message;$('ciError').hidden=false;render();}
   }
   async function mutate(path,method='POST',body){
     if(busy||!data||loadFailed)return;
@@ -168,7 +206,7 @@ if(typeof document!=='undefined')(()=>{
   $('ciPause').onclick=()=>mutate('checkin/runs/'+data.run.id+'/'+(data.run.status==='paused'?'resume':'pause'));
   $('ciStop').onclick=()=>mutate('checkin/runs/'+data.run.id+'/stop');
   $('ciAttention').onchange=render;$('ciHistory').onchange=load;
-  $('ciPreview').onclick=()=>{preview=!preview;++revision;selectedAccount=selectedJob=null;$('ciError').hidden=true;loadFailed=false;if(preview){data=dailyCheckin.demo();render();}else{data=null;$('ciHistory').value='';$('ciPreview').textContent='Preview with sample data';$('ciNotice').textContent='Loading current check-in state…';render();load();}};
+  $('ciPreview').onclick=()=>{preview=!preview;++revision;selectedAccount=selectedJob=null;$('ciError').hidden=true;loadFailed=false;if(preview){data=dailyCheckin.demo();receivedAt=performance.now();render();}else{data=null;$('ciHistory').value='';$('ciPreview').textContent='Preview with sample data';$('ciNotice').textContent='Loading current check-in state…';render();load();}};
   $('ciSchedule').onclick=()=>{
     if(!data)return;
     const form=$('ciScheduleForm');for(const [k,v] of Object.entries(data.settings)){if(!form.elements[k])continue;if(k==='enabled')form.elements[k].checked=v;else form.elements[k].value=v;}
@@ -186,6 +224,7 @@ if(typeof document!=='undefined')(()=>{
   const priorTab=setTab;setTab=function(tab){priorTab(tab);page.hidden=currentView!=='checkin';nav.setAttribute('aria-current',currentView==='checkin'?'page':'false');if(currentView==='checkin'){$('breadcrumb').textContent='Daily Check-in';if(preview)render();else load();}else{++revision;$('ciScheduleDialog').close();}};
   const priorRefresh=refresh;refresh=async function(){await priorRefresh();if(active&&currentView==='checkin')await load();};
   const option=text('option','Daily Check-in');option.value='checkin';$('settingsForm').elements.default_view.append(option);
-  $('logout').addEventListener('click',()=>{++revision;data=null;preview=false;selectedAccount=selectedJob=null;$('ciAccounts').replaceChildren();$('ciDetail').replaceChildren();$('ciScheduleDialog').close();});
+  $('logout').addEventListener('click',()=>{++revision;data=null;preview=false;selectedAccount=selectedJob=null;$('ciAccounts').replaceChildren();$('ciDetail').replaceChildren();$('ciLiveRows').replaceChildren();$('ciLiveCount').textContent='';$('ciScheduleDialog').close();});
+  setInterval(()=>{if(active&&currentView==='checkin'&&!document.hidden&&!loadFailed)renderSessionTimes();},1000);
   if(active&&currentView==='checkin')setTab('checkin');
 })();

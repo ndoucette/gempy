@@ -73,3 +73,17 @@
 #ciScheduleForm input{width:100%}#ciScheduleForm input[type=checkbox]{width:auto}
 @media(max-width:1050px){.ci-workspace{grid-template-columns:minmax(0,1.5fr) minmax(230px,1fr)}.ci-detail{padding:20px 18px}.ci-marks{flex-basis:100px}.ci-summary{padding:20px}}
 @media(max-width:700px){.ci-workspace{grid-template-columns:1fr}.ci-detail{border-left:0;border-top:1px solid var(--line)}.ci-progress-area{min-width:0;flex-basis:100%}.ci-summary-main{gap:16px}.ci-summary{padding:17px}.ci-footer{align-items:flex-start}.ci-footer>.ci-actions{width:100%}.ci-footer select{max-width:180px}.ci-character{min-height:40px}.ci-lane{padding:16px 10px}#checkin .page-heading{align-items:flex-start;flex-wrap:wrap}#checkin .page-heading h2{font-size:27px}}
+.ci-live{margin-top:22px;padding:20px 16px 8px;border:1px solid var(--line);border-radius:7px}
+.ci-live-scroll{overflow-x:auto}
+#ciLiveTable{width:100%;border-collapse:collapse;text-align:left;font-size:13px}
+#ciLiveTable th{padding:0 10px 10px;color:var(--muted);font-size:11px;font-weight:500}
+#ciLiveTable td{padding:13px 10px;border-top:1px solid var(--line);vertical-align:middle}
+#ciLiveTable td:first-child{width:40%}
+#ciLiveTable th:nth-child(2),#ciLiveTable td:nth-child(2){text-align:right;padding-right:28px;white-space:nowrap}
+#ciLiveTable strong{font-weight:550;overflow-wrap:anywhere}
+#ciLiveTable small{display:block;margin-top:4px}
+.ci-session-time{font-variant-numeric:tabular-nums;font-size:15px}
+.ci-live-status{color:var(--gold)}
+#ciLiveNotice{padding:0 7px 10px;font-size:12px;color:var(--ci-amber)}
+.ci-live .ci-empty{padding:6px 7px 14px;margin:0}
+@media(max-width:700px){.ci-live{padding:17px 10px 6px}#ciLiveTable td,#ciLiveTable th{padding-left:7px;padding-right:7px}#ciLiveTable th:nth-child(2),#ciLiveTable td:nth-child(2){padding-right:14px}#ciLiveTable td:first-child{width:35%}}

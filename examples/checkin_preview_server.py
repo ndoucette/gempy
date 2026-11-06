@@ -4,6 +4,7 @@ Run with Python then visit http://127.0.0.1:18767/?view=checkin . All mutations
 are rejected. The page's sample preview interactions remain browser-local.
 """
 import json
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -12,6 +13,7 @@ ROOT=Path(__file__).resolve().parent.parent/'static'
 SETTINGS=dict(timezone='America/Los_Angeles',day_boundary=5,stale_seconds=20,expiry_seconds=300,
               default_client='vellum_despana',density='comfortable',default_view='checkin',update_interval=3,
               reporter_configured=False)
+STARTED=time.time()
 ACCOUNTS={'Account A':['Renwaldo','Vlatimire'],'Account B':['Voxy','Gringott'],'Account C':['Vecto','Dartwen']}
 
 
@@ -20,7 +22,9 @@ class Fixture(BaseHTTPRequestHandler):
         path=urlsplit(self.path).path
         state=dict(allowed=False,disabled_reason='Live execution is disabled. This isolated fixture cannot connect to game sessions.',
                    settings=dict(enabled=False,time='00:15',parallel_accounts=4,freshness_hours=22),run=None,history=[],
-                   now=1792778400,game_day='2026-10-23',roster=[dict(account=a,account_label=a,character=c) for a,names in ACCOUNTS.items() for c in names])
+                   sessions=[dict(id='sample-live-1',character='Renwaldo',account_label='Account A',realm='prime',started_at=STARTED-47,status='capturing',attachment='Headless'),
+                             dict(id='sample-live-2',character='Dartwen',account_label='Account C',realm='prime',started_at=STARTED-126,status='online',attachment='Attached')],
+                   now=time.time(),game_day='2026-10-23',roster=[dict(account=a,account_label=a,character=c) for a,names in ACCOUNTS.items() for c in names])
         api={'/api/auth':{'csrf':'fixture'},'/api/characters':{'accounts':ACCOUNTS},'/api/sessions':{'sessions':[]},
              '/api/settings':SETTINGS,'/api/profiles':{'profiles':[]},'/api/checkin':state}
         if path in api:

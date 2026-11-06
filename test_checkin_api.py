@@ -33,6 +33,16 @@ class CheckinApiTests(unittest.TestCase):
         self.assertEqual(self.client.post('/api/checkin/runs',json={},headers=headers).status_code,409)
         self.assertEqual(self.service.started,[])
 
+    def test_overview_includes_manual_live_sessions_when_no_run_exists(self):
+        self.login()
+        self.service.online = [dict(id='manual:1', character='Alpha', realm='prime', attachment='Attached', started_at=100)]
+        result = self.client.get('/api/checkin')
+        self.assertEqual(result.status_code, 200)
+        self.assertIsNone(result.json()['run'])
+        self.assertEqual(result.json()['sessions'][0]['character'], 'Alpha')
+        self.service.online = []
+        self.assertEqual(self.client.get('/api/checkin').json()['sessions'], [])
+
     def test_settings_and_assets(self):
         headers=self.login()
         self.assertEqual(self.client.put('/api/checkin/settings',json={'parallel_accounts':3},headers=headers).json()['parallel_accounts'],3)

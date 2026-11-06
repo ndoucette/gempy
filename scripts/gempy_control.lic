@@ -1,0 +1,390 @@
+# frozen_string_literal: true
+=begin
+Gempy command bridge, protocol 1. Linux/WSL, same host and OS user only.
+Start explicitly: ;gempy_control   Stop explicitly: ;kill gempy_control
+;gempy_control --help
+Requires the native ClientInputDispatcher serialization block, do_client,
+UserExitDispatch, ShutdownCoordinator, and Game socket/read-thread lifecycle.
+Unsupported runtimes remain unavailable; there is no fallback transport.
+Gempy and Lich must share GEMPY_CONTROL_DIR, or GEMPY_STATE_DIR/control
+(default: $XDG_STATE_HOME/gempy/control, otherwise ~/.local/state/gempy/control).
+=end
+
+require 'json'
+require 'socket'
+require 'securerandom'
+require 'digest'
+require 'fileutils'
+require 'timeout'
+
+module GempyControl
+  PROTOCOL = 1
+  IDENTITY = %w[protocol pid process_start session_id bridge_generation character realm].freeze
+  FEATURES = %w[dispatch receipt deadline native_input].freeze
+
+  def self.default_directory
+    ENV['GEMPY_CONTROL_DIR'] || File.join(ENV['GEMPY_STATE_DIR'] ||
+      File.join(ENV['XDG_STATE_HOME'] || File.expand_path('~/.local/state'), 'gempy'), 'control')
+  end
+
+  # Observe every native open/close, including a close/open between two polls.
+  # Socket object identity also catches native replacement outside these calls.
+  module ConnectionLifecycle
+    def open(...)
+      gempy_control_transition(true)
+      super
+    ensure
+      gempy_control_transition(false)
+    end
+
+    def close(...)
+      gempy_control_transition(true)
+      super
+    ensure
+      gempy_control_transition(false)
+    end
+
+    def gempy_control_transition(changing)
+      @gempy_control_lifecycle_mutex.synchronize do
+        @gempy_control_connection_epoch += 1
+        @gempy_control_changing = changing
+      end
+    end
+
+    def gempy_control_connection_snapshot
+      @gempy_control_lifecycle_mutex.synchronize do
+        [@socket, @gempy_control_connection_epoch, @gempy_control_changing]
+      end
+    end
+  end
+
+  class Runtime
+    def initialize
+      @context = Object.new
+      @script = Script.current if defined?(Script) && Script.respond_to?(:current)
+      if defined?(Game) && Game.respond_to?(:open) && Game.respond_to?(:close) &&
+          !Game.singleton_class.ancestors.include?(ConnectionLifecycle)
+        Game.instance_variable_set(:@gempy_control_lifecycle_mutex, Mutex.new)
+        Game.instance_variable_set(:@gempy_control_connection_epoch, 0)
+        Game.singleton_class.prepend(ConnectionLifecycle)
+      end
+    end
+
+    def capabilities?
+      defined?(Lich::Common::ClientInputDispatcher) &&
+        Lich::Common::ClientInputDispatcher.respond_to?(:dispatch) &&
+        Lich::Common::ClientInputDispatcher.method(:dispatch).arity == 1 &&
+        @context.respond_to?(:do_client, true) && @context.method(:do_client).arity == 1 &&
+        @context.respond_to?(:dispatch_client_input, true) &&
+        defined?(Lich::Main::UserExitDispatch) &&
+        Lich::Main::UserExitDispatch.respond_to?(:dispatch_detachable_client) &&
+        defined?(Lich::Common::ShutdownCoordinator) &&
+        Lich::Common::ShutdownCoordinator.respond_to?(:requested?) &&
+        defined?(Game) && %i[gempy_control_connection_snapshot closed? remote_eof? thread reader_thread autostarted?].all? { |name| Game.respond_to?(name) } &&
+        defined?(XMLData) && XMLData.respond_to?(:name) && XMLData.respond_to?(:game) &&
+        defined?(Char) && Char.respond_to?(:name) && $cmd_prefix.is_a?(String)
+    rescue StandardError
+      false
+    end
+
+    def snapshot
+      character = defined?(Char) ? Char.name.to_s : ''
+      realm = defined?(XMLData) ? { 'GS3' => 'prime', 'GS4' => 'prime', 'GSIV' => 'prime', 'GST' => 'test' }[XMLData.game.to_s.upcase] : nil
+      socket, epoch, changing = Game.gempy_control_connection_snapshot if defined?(Game) && Game.respond_to?(:gempy_control_connection_snapshot)
+      ready = capabilities? && !changing && socket && !socket.closed? && !Game.closed? &&
+        !Game.remote_eof? && Game.thread&.alive? && Game.reader_thread&.alive? &&
+        Game.autostarted? && !$offline_mode && !character.empty? &&
+        XMLData.name.to_s == character && realm && !Lich::Common::ShutdownCoordinator.requested?
+      { key: [socket, epoch, !!ready, character, realm], character: character,
+        realm: realm || 'unknown', ready: !!ready,
+        reason: ready ? nil : 'runtime_unavailable' }
+    rescue StandardError
+      { key: [nil, false], character: '', realm: 'unknown', ready: false, reason: 'runtime_unavailable' }
+    end
+
+    def dispatch(command)
+      # Reuse the native serialization block directly: calling
+      # dispatch_client_input inside it would acquire the same mutex twice.
+      Lich::Common::ClientInputDispatcher.dispatch(command) do |literal|
+        next unless yield
+        $_IDLETIMESTAMP_ = Time.now
+        unless Lich::Main::UserExitDispatch.dispatch_detachable_client(literal,
+            cmd_prefix: $cmd_prefix, current_script: @script)
+          @context.send(:do_client, "#{$cmd_prefix}#{literal}")
+        end
+      end
+    end
+  end
+
+  class Bridge
+    def initialize(runtime:, clock: -> { Time.now.to_f }, capacity: 10_000)
+      @runtime, @clock, @capacity = runtime, clock, capacity
+      @mutex = Mutex.new
+      @cache = {}
+      @dispatch_busy = false
+      @stopped = false
+      @pid = Process.pid
+      @start = File.read('/proc/self/stat').split(') ', 2).last.split[19].to_i
+      raise SecurityError, 'Linux process identity unavailable' unless @start.positive?
+    end
+
+    def record
+      @mutex.synchronize { refresh_locked; @identity.merge('features' => FEATURES, 'ready' => @snapshot[:ready] && !@stopped) }
+    end
+
+    def stop
+      @mutex.synchronize { @stopped = true }
+    end
+
+    def refresh_locked
+      snapshot = @runtime.snapshot
+      if @key != snapshot[:key]
+        @key = snapshot[:key]
+        @cache = {}
+        @identity = { 'pid' => @pid, 'process_start' => @start, 'session_id' => "#{@pid}:#{@start}",
+          'bridge_generation' => SecureRandom.hex(16), 'character' => snapshot[:character],
+          'realm' => snapshot[:realm], 'protocol' => PROTOCOL }
+      end
+      @snapshot = snapshot
+    end
+
+    def result(identity, state, reason = nil)
+      identity.merge('state' => state, 'reason' => reason)
+    end
+
+    def valid_command?(command)
+      command.is_a?(String) && command.encoding == Encoding::UTF_8 && command.valid_encoding? &&
+        command.bytesize <= 1024 && !command.strip.empty? && !command.match?(/[\p{Cc}]/u)
+    end
+
+    def expire_locked(entry)
+      if entry[:reply]['state'] == 'sending' && !entry[:admitted] && @clock.call >= entry[:deadline]
+        entry[:reply] = result(entry[:identity], 'not_sent', 'expired')
+      end
+      entry[:reply].dup
+    end
+
+    def handle(request, peer_uid:)
+      entry = nil
+      reply = @mutex.synchronize do
+        refresh_locked
+        identity = @identity.dup
+        if peer_uid != Process.uid || !request.is_a?(Hash) || IDENTITY.any? { |key| request[key] != identity[key] }
+          next result(identity, 'not_sent', 'identity_mismatch')
+        end
+        ready = @snapshot[:ready] && !@stopped
+        action = request['action']
+        if action == 'ping'
+          next result(identity, ready ? 'sent' : 'not_sent', ready ? nil : 'runtime_unavailable').merge('ready' => ready)
+        end
+        id = request['request_id']
+        unless id.is_a?(String) && id.bytesize.between?(1, 128) && !id.match?(/[\p{Cc}]/u)
+          next result(identity, 'not_sent', 'invalid_request_id')
+        end
+        if action == 'receipt'
+          next @cache[id] ? expire_locked(@cache[id]) : result(identity, 'not_sent', 'unknown_request')
+        end
+        next result(identity, 'not_sent', 'invalid_action') unless action == 'dispatch'
+        command, deadline = request.values_at('command', 'deadline')
+        unless valid_command?(command) && deadline.is_a?(Numeric) && deadline.finite?
+          next result(identity, 'not_sent', 'invalid_command')
+        end
+        fingerprint = Digest::SHA256.hexdigest(JSON.generate([command, deadline]))
+        if (old = @cache[id])
+          next old[:fingerprint] == fingerprint ? expire_locked(old) : result(identity, 'not_sent', 'request_conflict')
+        end
+        next result(identity, 'not_sent', 'cache_full') if @cache.size >= @capacity
+        entry = { fingerprint: fingerprint, identity: identity, deadline: deadline,
+          admitted: false, reply: result(identity, 'sending') }
+        @cache[id] = entry
+        unless ready
+          entry[:reply] = result(identity, 'not_sent', 'runtime_unavailable')
+          next entry[:reply].dup
+        end
+        if @clock.call >= deadline
+          entry[:reply] = result(identity, 'not_sent', 'expired')
+          next entry[:reply].dup
+        end
+        # Keep native dispatch admission separate from short-lived RPC slots.
+        # One blocked native hook/lock waiter must never fill all listener
+        # workers and prevent ping/receipt lookup. A busy rejection is cached
+        # for this ID and cannot be retried into dispatch later.
+        if @dispatch_busy
+          entry[:reply] = result(identity, 'not_sent', 'busy')
+          next entry[:reply].dup
+        end
+        @dispatch_busy = true
+        nil
+      end
+      return reply if reply
+
+      admitted = false
+      begin
+        @runtime.dispatch(request['command']) do
+          @mutex.synchronize do
+            refresh_locked
+            reason = if entry[:reply]['state'] == 'not_sent'
+                       entry[:reply]['reason']
+                     elsif @identity != entry[:identity]
+                       'identity_mismatch'
+                     elsif @stopped || !@snapshot[:ready]
+                       'runtime_unavailable'
+                     elsif @clock.call >= request['deadline']
+                       'expired'
+                     end
+            if reason
+              entry[:reply] = result(entry[:identity], 'not_sent', reason)
+              false
+            else
+              admitted = entry[:admitted] = true
+            end
+          end
+        end
+        @mutex.synchronize { entry[:reply] = result(entry[:identity], 'sent') if admitted }
+      rescue StandardError, ScriptError
+        @mutex.synchronize { entry[:reply] = result(entry[:identity], admitted ? 'unconfirmed' : 'not_sent', 'dispatcher_error') }
+      ensure
+        @mutex.synchronize { @dispatch_busy = false }
+      end
+      @mutex.synchronize { entry[:reply].dup }
+    end
+  end
+
+  class Server
+    MAX_REQUEST = 8192
+    MAX_CLIENTS = 32
+
+    def initialize(directory:, bridge:)
+      @directory, @bridge = File.expand_path(directory), bridge
+      @mutex = Mutex.new
+      @lifecycle_mutex = Mutex.new
+      @clients = []
+      @stopped = false
+    end
+
+    def start
+      raise SecurityError, 'Linux peer credentials required' unless RUBY_PLATFORM.include?('linux') && Socket.const_defined?(:SO_PEERCRED)
+      FileUtils.mkdir_p(@directory, mode: 0o700) unless File.exist?(@directory)
+      stat = File.lstat(@directory)
+      raise SecurityError, 'Control directory must be private and owned by this user' unless stat.directory? && !stat.symlink? && stat.uid == Process.uid && (stat.mode & 0o777) == 0o700
+      @record_path = File.join(@directory, "#{Process.pid}.json")
+      raise SecurityError, 'Control record already exists; inspect stale bridge before removing it' if File.exist?(@record_path) || File.symlink?(@record_path)
+      # Exclusive private record also prevents simultaneous bridge startup.
+      @record_file = File.open(@record_path, File::WRONLY | File::CREAT | File::EXCL, 0o600)
+      refresh
+      self
+    rescue Exception
+      stop if @record_file
+      raise
+    end
+
+    def refresh
+      @lifecycle_mutex.synchronize { refresh_locked }
+    end
+
+    def refresh_locked
+      return if @stopped
+      record = @bridge.record
+      return if @generation == record['bridge_generation']
+      old_server, old_path, old_thread = @server, @socket_path, @accept_thread
+      path = File.join(@directory, "#{Process.pid}-#{record['bridge_generation']}.sock")
+      raise SecurityError, 'Socket path already exists' if File.exist?(path) || File.symlink?(path)
+      # A private directory makes the bind/chmod interval inaccessible to peers.
+      server = UNIXServer.new(path)
+      File.chmod(0o600, path)
+      @server, @socket_path, @generation = server, path, record['bridge_generation']
+      @record_file.rewind
+      @record_file.write(JSON.generate(record.merge('socket' => File.basename(path))))
+      @record_file.truncate(@record_file.pos)
+      @record_file.flush
+      @accept_thread = frontend_thread { accept_loop(server) }
+      old_server&.close
+      old_thread&.join(1)
+      File.unlink(old_path) if old_path && File.socket?(old_path)
+    end
+
+    def accept_loop(server)
+      loop do
+        client = server.accept
+        accepted = @mutex.synchronize do
+          @clients.reject! { |thread, _| !thread.alive? }
+          if @clients.size < MAX_CLIENTS
+            thread = frontend_thread { serve(client) }
+            @clients << [thread, client]
+            true
+          end
+        end
+        client.close unless accepted
+      end
+    rescue IOError, Errno::EBADF
+      nil
+    end
+
+    def frontend_thread(&block)
+      gate = Queue.new
+      thread = Thread.new { gate.pop; block.call }
+      # Native frontend threads have no owning script. Inheriting the bridge's
+      # group would make Script.start adopt children and copy background flags.
+      ThreadGroup::Default.add(thread)
+      gate << true
+      thread
+    rescue Exception
+      thread&.kill
+      raise
+    end
+
+    def serve(client)
+      uid = client.getsockopt(Socket::SOL_SOCKET, Socket::SO_PEERCRED).unpack('iii')[1]
+      request = Timeout.timeout(1) do
+        raw = client.gets(MAX_REQUEST + 1)
+        raise ArgumentError unless raw && raw.bytesize <= MAX_REQUEST && raw.end_with?("\n")
+        JSON.parse(raw)
+      end
+      reply = @bridge.handle(request, peer_uid: uid)
+      Timeout.timeout(1) { client.puts(JSON.generate(reply)) }
+    rescue StandardError
+      # Never log command text or attempt another dispatch after a socket error.
+      nil
+    ensure
+      client.close rescue nil
+    end
+
+    def stop
+      @lifecycle_mutex.synchronize do
+        return if @stopped
+        @stopped = true
+        @bridge.stop
+        @server&.close rescue nil
+        @accept_thread&.join(1)
+        @mutex.synchronize { @clients.each { |_, client| client.close rescue nil } }
+        @record_file&.close
+        File.unlink(@record_path) if @record_file && File.exist?(@record_path)
+        File.unlink(@socket_path) if @socket_path && File.socket?(@socket_path)
+      end
+    end
+  end
+end
+
+# Requiring/loading this file outside Lich defines the adapter without starting
+# anything. Lich runs it as an explicitly launched script.
+if defined?(Script) && Script.respond_to?(:current) && Script.current
+  if Script.current.vars.include?('--help')
+    respond 'Gempy control: same Linux/WSL host and OS user; native input dispatcher and game lifecycle required.'
+    respond "Shared control directory: #{GempyControl.default_directory}; configure GEMPY_CONTROL_DIR identically in Gempy and Lich."
+    respond 'Start: ;gempy_control   Stop: ;kill gempy_control. Survives ;pause all and ;kill all. No automatic replay.'
+  else
+    no_kill_all
+    no_pause_all
+    hide_me
+    silence_me
+    bridge = GempyControl::Bridge.new(runtime: GempyControl::Runtime.new)
+    server = GempyControl::Server.new(directory: GempyControl.default_directory, bridge: bridge)
+    before_dying { server.stop }
+    begin
+      server.start
+      loop { server.refresh; sleep 0.2 }
+    ensure
+      server.stop
+    end
+  end
+end
