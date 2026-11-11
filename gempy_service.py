@@ -3,8 +3,10 @@
 Discovery never connects to a detachable listener. Credentials stay here.
 """
 import json
+import logging
 import os
 import re
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 import signal
 import socket
@@ -16,6 +18,8 @@ from client_options import CLIENTS, connection_details, saga_binary, saga_connec
 
 
 DEFAULT_REALM_FLAGS = {'prime': ['--gemstone'], 'test': ['--gemstone', '--test']}
+FRONTEND_IDLE_SECONDS = 60
+logger = logging.getLogger(__name__)
 
 
 class ServiceError(RuntimeError):
@@ -36,7 +40,7 @@ def process_info(pid):
         return None
 
 
-def tcp_rows():
+def tcp_rows(require_complete=False):
     rows = []
     readable = False
     for path in ('/proc/net/tcp', '/proc/net/tcp6'):
@@ -50,7 +54,8 @@ def tcp_rows():
                              'state': fields[3], 'inode': fields[9], 'address': fields[1].split(':')[0],
                              'remote_address': fields[2].split(':')[0]})
         except (OSError, ValueError, IndexError):
-            pass
+            if require_complete:
+                return None
     return rows if readable else None
 
 
@@ -109,6 +114,96 @@ class Service:
         self.locks = {}
         self.reserved = set()
         self._children = []
+        self._frontend_idle = {}
+        self._frontend_cleanup_stop = threading.Event()
+        self._frontend_cleanup_thread = None
+
+    @contextmanager
+    def _frontend_lock(self):
+        from account_guard import host_lock
+        # Serialize attachment and cleanup, including across Gempy processes.
+        with self._lock('web-frontends'), host_lock(self.state, 'web-frontends'):
+            path = self.state / 'frontend-idle.json'
+            try:
+                saved = json.loads(path.read_text())
+                now = time.monotonic()
+                self._frontend_idle = {k: v for k, v in saved.items()
+                    if isinstance(v, (int, float)) and 0 <= v <= now}
+            except (FileNotFoundError, ValueError, TypeError, AttributeError):
+                # A missing/corrupt record or reboot starts a fresh grace period.
+                self._frontend_idle = {}
+            try:
+                yield
+            finally:
+                temporary = path.with_suffix('.tmp')
+                temporary.write_text(json.dumps(self._frontend_idle))
+                os.replace(temporary, path)
+
+    def start_frontend_cleanup(self):
+        with self.guard:
+            if self._frontend_cleanup_thread and self._frontend_cleanup_thread.is_alive():
+                return
+            self._frontend_cleanup_stop.clear()
+
+            def monitor():
+                while not self._frontend_cleanup_stop.wait(5):
+                    try:
+                        self.cleanup_frontends()
+                    except Exception:
+                        # Do not expose pairing data or let one failed scan kill cleanup.
+                        logger.warning('Web frontend cleanup scan failed; will retry.')
+
+            self._frontend_cleanup_thread = threading.Thread(
+                target=monitor, name='gempy-frontend-cleanup', daemon=True)
+            self._frontend_cleanup_thread.start()
+
+    def stop_frontend_cleanup(self):
+        self._frontend_cleanup_stop.set()
+        if self._frontend_cleanup_thread:
+            self._frontend_cleanup_thread.join(timeout=6)
+
+    @staticmethod
+    def _managed_frontend(current):
+        args = current['args']
+        if not args or not Path(args[0]).name.startswith('vellum-fe'):
+            return False
+        options = dict(zip(args[:-1], args[1:]))
+        return (options.get('--launch-profile', '').startswith('gempy-') or
+                (options.get('--frontend') == 'headless' and
+                 options.get('--profile', '').startswith('gempy-')))
+
+    def _frontend_has_browser(self, entry, rows):
+        inodes = socket_inodes(entry['pid'])
+        if rows is None or inodes is None or not any(
+                r['local'] == entry['port'] and r['state'] == '0A' and
+                r['inode'] in inodes for r in rows):
+            return None  # Missing visibility is not evidence of an idle frontend.
+        return any(r['local'] == entry['port'] and r['state'] == '01' and
+                   r['inode'] in inodes for r in rows)
+
+    def cleanup_frontends(self):
+        """Reclaim browserless Gempy engines without sending game commands."""
+        with self._frontend_lock():
+            rows = tcp_rows(require_complete=True)
+            now = time.monotonic()
+            seen = set()
+            for entry in self._vellum_entries():
+                key = f"{entry['pid']}:{entry['_start']}"
+                current = process_info(entry['pid'])
+                if (not current or current['start'] != entry['_start'] or
+                        not self._managed_frontend(current)):
+                    continue
+                seen.add(key)
+                if self._frontend_has_browser(entry, rows) is not False:
+                    self._frontend_idle.pop(key, None)
+                    continue
+                since = self._frontend_idle.setdefault(key, now)
+                if now - since >= FRONTEND_IDLE_SECONDS:
+                    # Recheck immediately before signaling; a tab may have reconnected.
+                    if self._frontend_has_browser(entry, tcp_rows(require_complete=True)) is False:
+                        self._stop_frontend(entry)
+                    self._frontend_idle.pop(key, None)
+            self._frontend_idle = {k: v for k, v in self._frontend_idle.items() if k in seen}
 
     def _track(self, child):
         with self.guard:
@@ -415,14 +510,20 @@ class Service:
                         continue
                     if owns_listener(p['pid'], int(entry['port'])):
                         entry['_start'] = p['start']
+                        entry['_args'] = p['args']
                         yield entry
                 except (OSError, ValueError, KeyError, TypeError):
                     continue
 
-    def _client_for(self, p):
-        rows = tcp_rows() or []
+    def _client_for(self, p, connected_only=False):
+        rows = tcp_rows()
+        if rows is None:
+            return None
+        candidate = None
         for entry in self._vellum_entries():
-            sockets = socket_inodes(entry['pid']) or set()
+            sockets = socket_inodes(entry['pid'])
+            if sockets is None:
+                continue
             identity = (entry.get('launch') or {}).get('connection', {})
             backend_sockets = socket_inodes(p['pid']) if 'pid' in p else None
             connected = any(r['remote'] == p['port'] and r['remote_address'] in ('0100007F', '0000000000000000FFFF00000100007F')
@@ -433,9 +534,28 @@ class Service:
                                 and backend['address'] == r['remote_address']
                                 and backend['remote_address'] == r['address'] for backend in rows)
                             for r in rows)
-            if connected or (p.get('attachment') != 'Attached' and identity.get('kind') == 'lich' and identity.get('port') == p['port'] and identity.get('host') in ('127.0.0.1', 'localhost')):
+            if connected:
                 return entry
-        return None
+            if connected_only:
+                continue
+            # --profile launches have no registry launch metadata. Reuse their
+            # verified command-line target rather than accumulating idle engines.
+            args = entry.get('_args', [])
+            options = dict(zip(args[:-1], args[1:]))
+            profile = f"gempy-{p.get('character')}-{p.get('realm')}"
+            matches = (self._managed_frontend({'args': args}) and
+                       options.get('--profile', options.get('--launch-profile')) == profile and
+                       options.get('--port') == str(p['port']) and
+                       options.get('--host') in ('127.0.0.1', 'localhost'))
+            matches = matches or (p.get('attachment') != 'Attached' and
+                identity.get('kind') == 'lich' and identity.get('port') == p['port'] and
+                identity.get('host') in ('127.0.0.1', 'localhost'))
+            # Never retarget an engine that is now connected elsewhere.
+            outgoing = any(r['state'] == '01' and r['inode'] in sockets and
+                           r['local'] != entry['port'] for r in rows)
+            if matches and not outgoing and candidate is None:
+                candidate = entry
+        return candidate
 
     def _token(self, entry):
         root = Path(entry.get('data_root') or os.environ.get('VELLUM_FE_DIR') or Path.home() / '.vellum-fe')
@@ -463,7 +583,8 @@ class Service:
             raise ServiceError('Unable to communicate with Vellum.') from None
 
     def attach(self, session_id, client='vellum_despana'):
-        with self._lock(('client-launch', client)):
+        with self._lock(('client-launch', client)), (self._frontend_lock() if client in
+                ('vellum_web', 'vellum_despana') else nullcontext()):
             return self._attach(session_id, client)
 
     def _attach(self, session_id, client):
@@ -489,6 +610,7 @@ class Service:
                 if p['attachment'] == 'Attached' and not self._multi_client(p):
                     raise ServiceError('Another frontend is attached. Close that frontend before attaching Vellum.')
                 web_port = self._allocate(18080)
+                child = None
                 try:
                     child = subprocess.Popen([self.vellum, '--frontend', 'headless', '--character', p['character'],
                                               '--profile', f"gempy-{p['character']}-{p['realm']}", '--port', str(p['port']),
@@ -511,28 +633,45 @@ class Service:
                     deadline = time.monotonic() + 15
                     while time.monotonic() < deadline:
                         fresh = self._validated(session_id)
-                        if fresh['attachment'] == 'Attached' and self._client_for(fresh):
+                        if fresh['attachment'] == 'Attached' and self._client_for(fresh, connected_only=True) == entry:
                             break
                         time.sleep(0.2)
                     else:
                         raise ServiceError('Vellum could not attach to the Lich session.')
+                except Exception:
+                    if child is not None:
+                        # A failed launch must not leave a detached engine behind.
+                        if child.poll() is None:
+                            child.terminate()
+                        try:
+                            child.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            child.kill()
+                            child.wait(timeout=5)
+                    raise
                 finally:
                     with self.guard:
                         self.reserved.discard(web_port)
-            if p['attachment'] != 'Attached' and entry is not None:
+            if entry is not None and (p['attachment'] != 'Attached' or
+                    self._client_for(p, connected_only=True) != entry):
                 fresh = self._validated(session_id)
-                if fresh['attachment'] != 'Attached':
+                if fresh['attachment'] != 'Attached' or self._client_for(fresh, connected_only=True) != entry:
+                    if fresh['attachment'] == 'Attached' and not self._multi_client(fresh):
+                        raise ServiceError('Another frontend is attached. Close that frontend before attaching Vellum.')
                     self._websocket(entry, {'t': 'connect', 'd': {'mode': 'lich', 'host': '127.0.0.1', 'port': p['port'], 'character': p['character']}})
                     deadline = time.monotonic() + 15
                     while time.monotonic() < deadline:
                         fresh = self._validated(session_id)
-                        if fresh['attachment'] == 'Attached' and self._client_for(fresh):
+                        if fresh['attachment'] == 'Attached' and self._client_for(fresh, connected_only=True) == entry:
                             break
                         time.sleep(0.2)
                     else:
                         raise ServiceError('Vellum could not reattach to the Lich session.')
-            return {'session_id': session_id, 'web_port': entry['port'],
-                    'pairing_path': ('/play' if client == 'vellum_web' else '/despana') + '#token=' + quote(self._token(entry), safe='')}
+            result = {'session_id': session_id, 'web_port': entry['port'],
+                      'pairing_path': ('/play' if client == 'vellum_web' else '/despana') + '#token=' + quote(self._token(entry), safe='')}
+            if 'pid' in entry and '_start' in entry:
+                self._frontend_idle[f"{entry['pid']}:{entry['_start']}"] = time.monotonic()
+            return result
 
     def _checkin_socket(self, capture_id):
         if not isinstance(capture_id, str) or not re.fullmatch(r'[a-f0-9]{48}', capture_id):
@@ -594,7 +733,7 @@ class Service:
             raise ServiceError('Automatic cleanup requires Lich ownership arbitration.')
         with self._lock(session_id):
             p = self._validated(session_id)
-            entry = self._client_for(p)
+            entry = self._client_for(p, connected_only=p['attachment'] == 'Attached')
             deadline = time.monotonic() + (10 if force else 70)
             if force:
                 # Revalidate immediately before signaling; pidfd closes PID-reuse race.
@@ -644,19 +783,17 @@ class Service:
         current = process_info(entry['pid'])
         if not current:
             return
-        args = current['args']
-        managed = any(i + 1 < len(args) and args[i + 1].startswith('gempy-')
-                      and (arg == '--launch-profile' or (arg == '--profile' and '--frontend' in args and 'headless' in args))
-                      for i, arg in enumerate(args))
-        if not managed:
+        if not self._managed_frontend(current):
             return
-        if current and current['start'] == entry['_start'] and hasattr(os, 'pidfd_open'):
+        if (current['start'] == entry['_start'] and hasattr(os, 'pidfd_open') and
+                hasattr(signal, 'pidfd_send_signal')):
             try:
                 fd = os.pidfd_open(entry['pid'])
                 try:
                     current = process_info(entry['pid'])
-                    if current and current['start'] == entry['_start']:
+                    if current and current['start'] == entry['_start'] and self._managed_frontend(current):
                         signal.pidfd_send_signal(fd, signal.SIGTERM)
+                        logger.info('Stopped Gempy web frontend pid=%s', entry['pid'])
                 finally:
                     os.close(fd)
             except OSError:

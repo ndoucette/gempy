@@ -130,9 +130,22 @@ a measure of open browser tabs.
 **Disconnect** asks for confirmation and requests an orderly Lich exit. Allow
 up to 70 seconds for cleanup. If orderly exit fails, a separately confirmed
 **Force Disconnect** can terminate the revalidated process. Successful disconnect
-also removes managed frontend processes. Closing a browser tab, logging out of
-Gempy, or stopping/restarting the daemon leaves game and Vellum sessions running;
-the next daemon start rediscovers them.
+also removes managed frontend processes. Closing the last browser tab leaves the
+character and Lich running, but Gempy now reclaims its managed Vellum web engine
+after 60 seconds with no browser connection (checked every five seconds).
+Refreshing or reopening within that grace period reuses the engine. Another open
+tab keeps it alive. Cleanup uses passive socket inspection and never sends a game
+logout command; desktop clients and independently launched frontends are excluded.
+Logging out of Gempy or stopping/restarting the daemon leaves game sessions running.
+The next daemon start rediscovers existing frontends and applies the same idle grace
+period, so older abandoned engines are reclaimed too. Cleanup runs while the web
+daemon or terminal launcher is running and pauses if socket ownership cannot be
+verified. A failed web frontend startup also terminates and reaps its child process.
+
+After installing this change, run `systemctl --user restart gempy.service` in WSL.
+Offline regression checks: `.venv/bin/python -m unittest -q test_frontend_cleanup
+test_service test_clients test_web test_terminal_service`. No real game login is
+needed for these checks.
 
 For LAN or Tailscale access, bind Gempy to all interfaces:
 

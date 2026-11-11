@@ -531,6 +531,7 @@ def cli():
     init_realms(config)
     from gempy_service import Service
     TERMINAL_SERVICE = Service(config)
+    TERMINAL_SERVICE.start_frontend_cleanup()
     try:
         curses.wrapper(main, config)
     except KeyboardInterrupt:
@@ -540,6 +541,8 @@ def cli():
         curses.endwin()
         logger.error(f"An unexpected error occurred: {e}")
         sys.exit(1)
+    finally:
+        TERMINAL_SERVICE.stop_frontend_cleanup()
 
 
 if __name__ == '__main__':

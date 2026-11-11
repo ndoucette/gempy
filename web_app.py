@@ -70,12 +70,16 @@ def create_app(config, service=None, directory=None, session_seconds=SESSION_SEC
 
     @asynccontextmanager
     async def lifespan(app):
-        checkin.start()
-        yield
-        checkin.close()
-        commands.close()
-        executor.shutdown(wait=False, cancel_futures=True)
-        telemetry.close()
+        getattr(service, 'start_frontend_cleanup', lambda: None)()
+        try:
+            checkin.start()
+            yield
+        finally:
+            getattr(service, 'stop_frontend_cleanup', lambda: None)()
+            checkin.close()
+            commands.close()
+            executor.shutdown(wait=False, cancel_futures=True)
+            telemetry.close()
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.telemetry = telemetry
